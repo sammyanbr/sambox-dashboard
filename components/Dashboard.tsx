@@ -99,10 +99,8 @@ export default function Dashboard() {
 
   const totalDespesasFixas = despesasFixas.reduce((acc, curr) => acc + curr.valor, 0);
 
-  const [transactions, setTransactions] = useState([
-    { id: 1, date: '2026-04-01', vendas: 5000, pix: 1200, publicidade: 1200, ads_facebook: 0, ads_google: 0, ads_tiktok: 0, instalacoes: 300, extras: 200, descricao_extra: 'Servidor VPS' },
-    { id: 2, date: '2026-04-02', vendas: 7500, pix: 2500, publicidade: 1500, ads_facebook: 0, ads_google: 0, ads_tiktok: 0, instalacoes: 450, extras: 100, descricao_extra: 'Domínio .com' },
-  ]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [isFetchingTransactions, setIsFetchingTransactions] = useState(false);
 
   // KeyAuth State
   const [keyAuthSellerKey, setKeyAuthSellerKey] = useState('b01f1b891124badd9be270a3db589cf6');
@@ -296,6 +294,27 @@ export default function Dashboard() {
 
     return () => unsubscribe();
   }, [user?.email, isGerente]);
+
+  // Fetch Transactions
+  React.useEffect(() => {
+    if (!isGerente) return;
+    
+    setIsFetchingTransactions(true);
+    const q = query(collection(db, 'transactions'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const transList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setTransactions(transList);
+      setIsFetchingTransactions(false);
+    }, (error) => {
+      console.error("Error fetching transactions:", error);
+      setIsFetchingTransactions(false);
+    });
+
+    return () => unsubscribe();
+  }, [isGerente]);
 
   const handleVideoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -493,34 +512,40 @@ export default function Dashboard() {
     setInstFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const newTransaction = {
-      id: Date.now(),
       date: formData.date,
       vendas: Number(formData.vendas) || 0,
       pix: Number(formData.pix) || 0,
       ads_facebook: Number(formData.ads_facebook) || 0,
       ads_google: Number(formData.ads_google) || 0,
       ads_tiktok: Number(formData.ads_tiktok) || 0,
-      publicidade: 0,
-      instalacoes: Number(formData.instalacoes) || 0,
       extras: Number(formData.extras) || 0,
-      descricao_extra: formData.descricao_extra
+      descricao_extra: formData.descricao_extra,
+      createdBy: user?.email || 'unknown',
+      createdAt: new Date().toISOString()
     };
-    setTransactions([newTransaction, ...transactions]);
-    setFormData({
-      date: new Date().toISOString().split('T')[0],
-      vendas: '',
-      pix: '',
-      ads_facebook: '',
-      ads_google: '',
-      ads_tiktok: '',
-      instalacoes: '',
-      extras: '',
-      descricao_extra: ''
-    });
-    setActiveSubTab('historico');
+    
+    try {
+      await addDoc(collection(db, 'transactions'), newTransaction);
+      setFormData({
+        date: new Date().toISOString().split('T')[0],
+        vendas: '',
+        pix: '',
+        ads_facebook: '',
+        ads_google: '',
+        ads_tiktok: '',
+        instalacoes: '',
+        extras: '',
+        descricao_extra: ''
+      });
+      setActiveSubTab('historico');
+      alert('Registro financeiro salvo com sucesso!');
+    } catch (err) {
+      console.error("Error adding transaction:", err);
+      alert('Erro ao salvar registro financeiro.');
+    }
   };
 
   const handleInstSubmit = async (e: React.FormEvent) => {
@@ -542,33 +567,6 @@ export default function Dashboard() {
     try {
       await addDoc(collection(db, 'installations'), newInstallation);
       
-      // Update Financeiro automatically
-      setTransactions(prev => {
-        const existingIndex = prev.findIndex(t => t.date === todayStr);
-        if (existingIndex !== -1) {
-          const updated = [...prev];
-          updated[existingIndex] = {
-            ...updated[existingIndex],
-            instalacoes: (updated[existingIndex].instalacoes || 0) + 1
-          };
-          return updated;
-        } else {
-          return [{
-            id: Date.now() + 1,
-            date: todayStr,
-            vendas: 0,
-            pix: 0,
-            ads_facebook: 0,
-            ads_google: 0,
-            ads_tiktok: 0,
-            publicidade: 0,
-            instalacoes: 1,
-            extras: 0,
-            descricao_extra: 'Registro automático de instalação'
-          }, ...prev];
-        }
-      });
-
       setInstFormData({
         nome: '',
         email: '',
@@ -596,7 +594,8 @@ export default function Dashboard() {
   };
 
   const filteredInstallations = installations.filter(inst => {
-    const instDate = inst.createdAt.split('T')[0];
+    if (!inst.createdAt) return false;
+    const instDate = typeof inst.createdAt === 'string' ? inst.createdAt.split('T')[0] : new Date(inst.createdAt.seconds * 1000).toISOString().split('T')[0];
     const matchesStartDate = filterStartDate ? instDate >= filterStartDate : true;
     const matchesEndDate = filterEndDate ? instDate <= filterEndDate : true;
     const matchesInstalador = filterInstalador ? inst.instalador.toLowerCase().includes(filterInstalador.toLowerCase()) : true;
@@ -619,12 +618,22 @@ export default function Dashboard() {
 
   // Calculations
   const INSTALLATION_COST = 30;
+  
+  const getInstallationsForDate = (dateStr: string) => {
+    return installations.filter(inst => {
+      if (!inst.createdAt) return false;
+      const instDate = typeof inst.createdAt === 'string' ? inst.createdAt.split('T')[0] : new Date(inst.createdAt.seconds * 1000).toISOString().split('T')[0];
+      return instDate === dateStr;
+    }).length;
+  };
+
   const calculateLucro = (t: any) => {
     const fbAds = (t.ads_facebook || 0) * 1.12;
     const googleAds = t.ads_google || 0;
     const tiktokAds = t.ads_tiktok || 0;
     const totalAds = fbAds + googleAds + tiktokAds + (t.publicidade || 0);
-    return (t.vendas + (t.pix || 0)) - totalAds - t.extras - (t.instalacoes * INSTALLATION_COST);
+    const instalacoesCount = getInstallationsForDate(t.date);
+    return (t.vendas + (t.pix || 0)) - totalAds - t.extras - (instalacoesCount * INSTALLATION_COST);
   };
   
   const today = new Date().toISOString().split('T')[0];
@@ -962,7 +971,6 @@ export default function Dashboard() {
                             value={formData.vendas}
                             onChange={handleInputChange}
                             placeholder="0.00"
-                            required
                             className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
                           />
                         </div>
@@ -978,7 +986,6 @@ export default function Dashboard() {
                             value={formData.pix}
                             onChange={handleInputChange}
                             placeholder="0.00"
-                            required
                             className="w-full bg-[#080808] border border-blue-500/30 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
                           />
                         </div>
@@ -1031,8 +1038,8 @@ export default function Dashboard() {
                         <div>
                           <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Instalações (Automático)</label>
                           <div className="w-full bg-[#080808]/50 border border-white/5 rounded-xl px-4 py-4 text-base text-gray-500 flex justify-between items-center">
-                            <span>{formData.instalacoes || 0} registradas</span>
-                            <span className="text-rose-500 font-bold">-{formatCurrency((Number(formData.instalacoes) || 0) * INSTALLATION_COST)}</span>
+                            <span>{getInstallationsForDate(formData.date)} registradas</span>
+                            <span className="text-rose-500 font-bold">-{formatCurrency(getInstallationsForDate(formData.date) * INSTALLATION_COST)}</span>
                           </div>
                           <p className="text-[10px] text-gray-600 mt-1 ml-1 uppercase font-bold">Vinculado ao módulo de instalações</p>
                         </div>
@@ -1045,7 +1052,6 @@ export default function Dashboard() {
                             value={formData.extras}
                             onChange={handleInputChange}
                             placeholder="0.00"
-                            required
                             className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
                           />
                         </div>
@@ -1089,33 +1095,45 @@ export default function Dashboard() {
                     
                     {/* Mobile View: List of Cards */}
                     <div className="md:hidden divide-y divide-white/10">
-                      {transactions.map((t) => {
-                        const lucro = calculateLucro(t);
-                        return (
-                          <div key={t.id} className="p-6 space-y-5">
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs font-black text-gray-500 uppercase tracking-widest">
-                                {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                              </span>
-                              <span className={`text-lg font-black ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                {formatCurrency(lucro)}
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
-                              <div className="text-gray-500 uppercase font-black tracking-tighter">Vendas: <span className="text-white block mt-1">{formatCurrency(t.vendas)}</span></div>
-                              <div className="text-blue-400 uppercase font-black tracking-tighter">Pix: <span className="text-white block mt-1">{formatCurrency(t.pix || 0)}</span></div>
-                              <div className="text-gray-500 uppercase font-black tracking-tighter">Ads: <span className="text-white block mt-1">{formatCurrency((t.ads_facebook || 0) * 1.12 + (t.ads_google || 0) + (t.ads_tiktok || 0) + (t.publicidade || 0))}</span></div>
-                              <div className="text-rose-400 uppercase font-black tracking-tighter">Instal: <span className="text-white block mt-1">-{formatCurrency(t.instalacoes * INSTALLATION_COST)}</span></div>
-                              <div className="text-gray-500 uppercase font-black tracking-tighter">Extras: <span className="text-white block mt-1">{formatCurrency(t.extras)}</span></div>
-                            </div>
-                            {t.descricao_extra && (
-                              <div className="bg-blue-600/10 border border-blue-500/20 rounded-xl p-4 text-xs text-blue-300/80 leading-relaxed">
-                                <span className="font-black uppercase block mb-1">Observação:</span> {t.descricao_extra}
+                      {isFetchingTransactions ? (
+                        <div className="p-12 text-center flex flex-col items-center gap-3">
+                          <Activity className="w-8 h-8 text-blue-500 animate-spin" />
+                          <span className="text-xs font-black text-blue-500 uppercase tracking-widest">Carregando transações...</span>
+                        </div>
+                      ) : transactions.length > 0 ? (
+                        transactions.map((t) => {
+                          const lucro = calculateLucro(t);
+                          const instalacoesCount = getInstallationsForDate(t.date);
+                          return (
+                            <div key={t.id} className="p-6 space-y-5">
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                                  {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                </span>
+                                <span className={`text-lg font-black ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                  {formatCurrency(lucro)}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                              <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
+                                <div className="text-gray-500 uppercase font-black tracking-tighter">Vendas: <span className="text-white block mt-1">{formatCurrency(t.vendas)}</span></div>
+                                <div className="text-blue-400 uppercase font-black tracking-tighter">Pix: <span className="text-white block mt-1">{formatCurrency(t.pix || 0)}</span></div>
+                                <div className="text-gray-500 uppercase font-black tracking-tighter">Ads: <span className="text-white block mt-1">{formatCurrency((t.ads_facebook || 0) * 1.12 + (t.ads_google || 0) + (t.ads_tiktok || 0) + (t.publicidade || 0))}</span></div>
+                                <div className="text-rose-400 uppercase font-black tracking-tighter">Instal: <span className="text-white block mt-1">-{formatCurrency(instalacoesCount * INSTALLATION_COST)}</span></div>
+                                <div className="text-gray-500 uppercase font-black tracking-tighter">Extras: <span className="text-white block mt-1">{formatCurrency(t.extras)}</span></div>
+                              </div>
+                              {t.descricao_extra && (
+                                <div className="bg-blue-600/10 border border-blue-500/20 rounded-xl p-4 text-xs text-blue-300/80 leading-relaxed">
+                                  <span className="font-black uppercase block mb-1">Observação:</span> {t.descricao_extra}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="p-12 text-center text-gray-600 text-sm font-medium italic">
+                          Nenhum registro financeiro encontrado.
+                        </div>
+                      )}
                     </div>
 
                     {/* Desktop View: Table */}
@@ -1133,56 +1151,74 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/10">
-                          {transactions.map((t) => {
-                            const lucro = calculateLucro(t);
-                            return (
-                              <tr key={t.id} className="hover:bg-white/[0.02] transition-colors group">
-                                <td className="px-6 py-6 text-sm text-gray-400 font-medium">
-                                  {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                                </td>
-                                <td className="px-6 py-6 text-sm text-emerald-500 font-black">
-                                  {formatCurrency(t.vendas)}
-                                </td>
-                                <td className="px-6 py-6 text-sm text-blue-400 font-black">
-                                  {formatCurrency(t.pix || 0)}
-                                </td>
-                                <td className="px-6 py-6 text-sm text-rose-500 font-medium">
-                                  <div className="flex flex-col">
-                                    <span>{formatCurrency((t.ads_facebook || 0) * 1.12 + (t.ads_google || 0) + (t.ads_tiktok || 0) + (t.publicidade || 0))}</span>
-                                    {((t.ads_facebook || 0) > 0 || (t.ads_google || 0) > 0 || (t.ads_tiktok || 0) > 0) && (
-                                      <span className="text-[10px] text-gray-600 uppercase mt-1">
-                                        {t.ads_facebook ? `FB: ${formatCurrency(t.ads_facebook * 1.12)} ` : ''}
-                                        {t.ads_google ? `GG: ${formatCurrency(t.ads_google)} ` : ''}
-                                        {t.ads_tiktok ? `TK: ${formatCurrency(t.ads_tiktok)}` : ''}
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-6 py-6 text-sm text-rose-400 font-black">
-                                  <div className="flex flex-col">
-                                    <span>-{formatCurrency(t.instalacoes * INSTALLATION_COST)}</span>
-                                    <span className="text-[10px] text-gray-600 uppercase">({t.instalacoes} un)</span>
-                                  </div>
-                                </td>
-                                <td className="px-6 py-6 text-sm text-rose-500 font-medium">
-                                  <div className="flex flex-col">
-                                    <span className="font-bold">{formatCurrency(t.extras)}</span>
-                                    {t.descricao_extra && (
-                                      <button 
-                                        onClick={() => setSelectedExtra(t.descricao_extra)}
-                                        className="text-xs text-blue-500 hover:text-blue-400 font-black uppercase tracking-tighter mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                      >
-                                        ( Ver Detalhes )
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className={`px-6 py-6 text-sm font-black text-right ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                  {formatCurrency(lucro)}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {isFetchingTransactions ? (
+                            <tr>
+                              <td colSpan={7} className="px-6 py-16 text-center">
+                                <div className="flex flex-col items-center gap-3">
+                                  <Activity className="w-8 h-8 text-blue-500 animate-spin" />
+                                  <span className="text-xs font-black text-blue-500 uppercase tracking-widest animate-pulse">Carregando transações...</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : transactions.length > 0 ? (
+                            transactions.map((t) => {
+                              const lucro = calculateLucro(t);
+                              const instalacoesCount = getInstallationsForDate(t.date);
+                              return (
+                                <tr key={t.id} className="hover:bg-white/[0.02] transition-colors group">
+                                  <td className="px-6 py-6 text-sm text-gray-400 font-medium">
+                                    {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                  </td>
+                                  <td className="px-6 py-6 text-sm text-emerald-500 font-black">
+                                    {formatCurrency(t.vendas)}
+                                  </td>
+                                  <td className="px-6 py-6 text-sm text-blue-400 font-black">
+                                    {formatCurrency(t.pix || 0)}
+                                  </td>
+                                  <td className="px-6 py-6 text-sm text-rose-500 font-medium">
+                                    <div className="flex flex-col">
+                                      <span>{formatCurrency((t.ads_facebook || 0) * 1.12 + (t.ads_google || 0) + (t.ads_tiktok || 0) + (t.publicidade || 0))}</span>
+                                      {((t.ads_facebook || 0) > 0 || (t.ads_google || 0) > 0 || (t.ads_tiktok || 0) > 0) && (
+                                        <span className="text-[10px] text-gray-600 uppercase mt-1">
+                                          {t.ads_facebook ? `FB: ${formatCurrency(t.ads_facebook * 1.12)} ` : ''}
+                                          {t.ads_google ? `GG: ${formatCurrency(t.ads_google)} ` : ''}
+                                          {t.ads_tiktok ? `TK: ${formatCurrency(t.ads_tiktok)}` : ''}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-6 text-sm text-rose-400 font-black">
+                                    <div className="flex flex-col">
+                                      <span>-{formatCurrency(instalacoesCount * INSTALLATION_COST)}</span>
+                                      <span className="text-[10px] text-gray-600 uppercase">({instalacoesCount} un)</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-6 text-sm text-rose-500 font-medium">
+                                    <div className="flex flex-col">
+                                      <span className="font-bold">{formatCurrency(t.extras)}</span>
+                                      {t.descricao_extra && (
+                                        <button 
+                                          onClick={() => setSelectedExtra(t.descricao_extra)}
+                                          className="text-xs text-blue-500 hover:text-blue-400 font-black uppercase tracking-tighter mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                          ( Ver Detalhes )
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className={`px-6 py-6 text-sm font-black text-right ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                    {formatCurrency(lucro)}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr>
+                              <td colSpan={7} className="px-6 py-12 text-center text-gray-600 text-sm font-medium italic">
+                                Nenhum registro financeiro encontrado.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1233,7 +1269,11 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <h3 className="text-3xl font-black text-white mb-2 tracking-tight">
-                  {filteredInstallations.filter(i => i.createdAt.startsWith(today)).length}
+                  {filteredInstallations.filter(i => {
+                    if (!i.createdAt) return false;
+                    const dateStr = typeof i.createdAt === 'string' ? i.createdAt : new Date(i.createdAt.seconds * 1000).toISOString();
+                    return dateStr.startsWith(today);
+                  }).length}
                 </h3>
                 <div className="text-xs uppercase tracking-widest font-black text-emerald-500">Novas</div>
               </div>
@@ -1374,7 +1414,7 @@ export default function Dashboard() {
                           <div>
                             <p className="text-sm font-black text-white uppercase">{inst.nome}</p>
                             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">
-                              {new Date(inst.createdAt).toLocaleString('pt-BR')}
+                              {typeof inst.createdAt === 'string' ? new Date(inst.createdAt).toLocaleString('pt-BR') : new Date(inst.createdAt.seconds * 1000).toLocaleString('pt-BR')}
                             </p>
                           </div>
                           <div className="flex gap-2">
@@ -1421,7 +1461,7 @@ export default function Dashboard() {
                         {filteredInstallations.map((inst) => (
                           <tr key={inst.id} className="hover:bg-white/[0.02] transition-colors">
                             <td className="px-6 py-6 text-sm text-gray-400 font-medium">
-                              {new Date(inst.createdAt).toLocaleString('pt-BR')}
+                              {typeof inst.createdAt === 'string' ? new Date(inst.createdAt).toLocaleString('pt-BR') : new Date(inst.createdAt.seconds * 1000).toLocaleString('pt-BR')}
                             </td>
                             <td className="px-6 py-6 text-sm text-white font-black uppercase tracking-tight">
                               {inst.nome}
@@ -1811,100 +1851,6 @@ export default function Dashboard() {
                     {keyAuthError}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* Modal de Confirmação de Exclusão de Vídeo */}
-            {videoToDelete && (
-              <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-                <div className="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
-                      <Trash2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-black text-white uppercase tracking-tight">Excluir Vídeo?</h3>
-                      <p className="text-xs text-gray-500 font-medium">Esta ação não pode ser desfeita.</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setVideoToDelete(null)}
-                      className="flex-1 py-3 rounded-xl bg-white/5 text-gray-400 text-xs font-black uppercase tracking-widest hover:bg-white/10 transition-all"
-                    >
-                      Cancelar
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteVideo(videoToDelete)}
-                      disabled={isVideoLoading}
-                      className="flex-1 py-3 rounded-xl bg-red-600 text-white text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 disabled:opacity-50"
-                    >
-                      {isVideoLoading ? 'Excluindo...' : 'Confirmar'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Modal do Player de Vídeo */}
-            {playingVideo && (
-              <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
-                <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col max-h-full">
-                  <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
-                        <Video className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm md:text-base font-black text-white uppercase tracking-tight leading-tight line-clamp-1">{playingVideo.title}</h3>
-                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Tutorial por {playingVideo.createdBy.split('@')[0]}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => setPlayingVideo(null)}
-                      className="p-2 rounded-xl bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
-                    >
-                      <Plus className="w-6 h-6 rotate-45" />
-                    </button>
-                  </div>
-                  
-                  <div className="relative aspect-video bg-black flex-1">
-                    {playingVideo.url.includes('youtube.com') || playingVideo.url.includes('youtu.be') ? (
-                      <iframe 
-                        src={getEmbedUrl(playingVideo.url)}
-                        className="absolute inset-0 w-full h-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      ></iframe>
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-                        <Video className="w-16 h-16 text-gray-800 mb-4" />
-                        <h4 className="text-lg font-black text-white uppercase tracking-tight mb-2">Link Externo Detectado</h4>
-                        <p className="text-sm text-gray-500 font-medium max-w-md mb-6">
-                          Este vídeo não pode ser reproduzido diretamente aqui por questões de segurança ou formato. Clique no botão abaixo para assistir na fonte original.
-                        </p>
-                        <a 
-                          href={playingVideo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-8 py-4 bg-blue-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
-                        >
-                          Abrir Link Original <ExternalLink className="w-4 h-4" />
-                        </a>
-                      </div>
-                    )}
-                  </div>
-
-                  {playingVideo.description && (
-                    <div className="p-6 md:p-8 bg-white/[0.01] border-t border-white/5 overflow-y-auto">
-                      <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Sobre este tutorial</h4>
-                      <p className="text-sm text-gray-300 font-medium leading-relaxed">
-                        {playingVideo.description}
-                      </p>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
@@ -2702,6 +2648,100 @@ export default function Dashboard() {
           </div>
         </div>
       </footer>
+
+      {/* Modal de Confirmação de Exclusão de Vídeo */}
+      {videoToDelete && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tight">Excluir Vídeo?</h3>
+                <p className="text-xs text-gray-500 font-medium">Esta ação não pode ser desfeita.</p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setVideoToDelete(null)}
+                className="flex-1 py-3 rounded-xl bg-white/5 text-gray-400 text-xs font-black uppercase tracking-widest hover:bg-white/10 transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => handleDeleteVideo(videoToDelete)}
+                disabled={isVideoLoading}
+                className="flex-1 py-3 rounded-xl bg-red-600 text-white text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 disabled:opacity-50"
+              >
+                {isVideoLoading ? 'Excluindo...' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal do Player de Vídeo */}
+      {playingVideo && (
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col max-h-full">
+            <div className="p-4 md:p-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
+                  <Video className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm md:text-base font-black text-white uppercase tracking-tight leading-tight line-clamp-1">{playingVideo.title}</h3>
+                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Tutorial por {playingVideo.createdBy.split('@')[0]}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setPlayingVideo(null)}
+                className="p-2 rounded-xl bg-white/5 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            
+            <div className="relative aspect-video bg-black flex-1">
+              {playingVideo.url.includes('youtube.com') || playingVideo.url.includes('youtu.be') ? (
+                <iframe 
+                  src={getEmbedUrl(playingVideo.url)}
+                  className="absolute inset-0 w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+                  <Video className="w-16 h-16 text-gray-800 mb-4" />
+                  <h4 className="text-lg font-black text-white uppercase tracking-tight mb-2">Link Externo Detectado</h4>
+                  <p className="text-sm text-gray-500 font-medium max-w-md mb-6">
+                    Este vídeo não pode ser reproduzido diretamente aqui por questões de segurança ou formato. Clique no botão abaixo para assistir na fonte original.
+                  </p>
+                  <a 
+                    href={playingVideo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-8 py-4 bg-blue-600 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
+                  >
+                    Abrir Link Original <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {playingVideo.description && (
+              <div className="p-6 md:p-8 bg-white/[0.01] border-t border-white/5 overflow-y-auto">
+                <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3">Sobre este tutorial</h4>
+                <p className="text-sm text-gray-300 font-medium leading-relaxed">
+                  {playingVideo.description}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         .no-scrollbar::-webkit-scrollbar {

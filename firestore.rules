@@ -87,7 +87,21 @@ service cloud.firestore {
              data.telefone is string &&
              data.instalador is string &&
              data.createdBy is string &&
-             data.createdAt is timestamp;
+             data.createdAt is string;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['date', 'vendas', 'pix', 'ads_facebook', 'ads_google', 'ads_tiktok', 'extras', 'descricao_extra', 'createdBy', 'createdAt']) &&
+             data.date is string &&
+             data.vendas is number &&
+             data.pix is number &&
+             data.ads_facebook is number &&
+             data.ads_google is number &&
+             data.ads_tiktok is number &&
+             data.extras is number &&
+             data.descricao_extra is string &&
+             data.createdBy is string &&
+             data.createdAt is string;
     }
 
     // ===============================================================
@@ -130,6 +144,13 @@ service cloud.firestore {
                     
       allow update: if isGerente() && isValidInstallation(request.resource.data);
       
+      allow delete: if isGerente();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isGerente();
+      allow create: if isGerente() && isValidTransaction(request.resource.data);
+      allow update: if isGerente() && isValidTransaction(request.resource.data);
       allow delete: if isGerente();
     }
   }
