@@ -75,9 +75,38 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["nome", "email", "telefone", "instalador", "createdBy", "createdAt"]
+    },
+    "QuickLink": {
+      "title": "Quick Sales Link",
+      "description": "Quick link for sales with coupons",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
+        "valor": { "type": "string" },
+        "link": { "type": "string", "format": "uri" },
+        "cupons": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nome", "valor", "link", "createdBy", "createdAt"]
     }
   },
   "firestore": {
+    "/samboxLinks/{linkId}": {
+      "schema": {
+        "$ref": "#/entities/QuickLink"
+      },
+      "description": "Quick links for Sambox"
+    },
+    "/steamLinks/{linkId}": {
+      "schema": {
+        "$ref": "#/entities/QuickLink"
+      },
+      "description": "Quick links for Steam"
+    },
     "/users/{userId}": {
       "schema": {
         "$ref": "#/entities/UserProfile"

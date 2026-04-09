@@ -104,6 +104,16 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidQuickLink(data) {
+      return data.keys().hasAll(['nome', 'valor', 'link', 'cupons', 'createdBy', 'createdAt']) &&
+             data.nome is string &&
+             data.valor is string &&
+             data.link is string &&
+             data.cupons is list &&
+             data.createdBy is string &&
+             data.createdAt is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -151,6 +161,20 @@ service cloud.firestore {
       allow read: if isGerente();
       allow create: if isGerente() && isValidTransaction(request.resource.data);
       allow update: if isGerente() && isValidTransaction(request.resource.data);
+      allow delete: if isGerente();
+    }
+
+    match /samboxLinks/{linkId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidQuickLink(request.resource.data);
+      allow update: if isGerente() && isValidQuickLink(request.resource.data);
+      allow delete: if isGerente();
+    }
+
+    match /steamLinks/{linkId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidQuickLink(request.resource.data);
+      allow update: if isGerente() && isValidQuickLink(request.resource.data);
       allow delete: if isGerente();
     }
   }
