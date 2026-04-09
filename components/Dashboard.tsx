@@ -401,13 +401,14 @@ export default function Dashboard() {
   const [generatedZapLink, setGeneratedZapLink] = useState('');
 
   // Sambox Links State
-  const [samboxLinks, setSamboxLinks] = useState([
-    { id: 1, nome: 'Sambox - Plano Mensal', valor: '29.90', link: 'https://checkout.exemplo.com/mensal', cupons: [] },
-    { id: 2, nome: 'Sambox - Plano Anual', valor: '299.00', link: 'https://checkout.exemplo.com/anual', cupons: ['ANUAL10', 'PROMO15'] },
-    { id: 3, nome: 'Sambox - Plano Vitalício', valor: '599.00', link: 'https://checkout.exemplo.com/vitalicio', cupons: ['VITALICIO20'] },
-    { id: 4, nome: 'Taxa de Instalação', valor: '30.00', link: 'https://checkout.exemplo.com/instalacao', cupons: [] },
-  ]);
-
+  interface QuickLink {
+    id: string;
+    nome: string;
+    valor: string;
+    link: string;
+    cupons: string[];
+  }
+  const [samboxLinks, setSamboxLinks] = useState<QuickLink[]>([]);
   const [samboxLinkFormData, setSamboxLinkFormData] = useState({
     nome: '',
     valor: '',
@@ -415,35 +416,8 @@ export default function Dashboard() {
     cupons: ''
   });
 
-  const handleSamboxLinkInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setSamboxLinkFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleSamboxLinkSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cuponsArray = samboxLinkFormData.cupons
-      .split(',')
-      .map(c => c.trim())
-      .filter(c => c.length > 0);
-
-    const newLink = {
-      id: Date.now(),
-      nome: samboxLinkFormData.nome,
-      valor: samboxLinkFormData.valor,
-      link: samboxLinkFormData.link,
-      cupons: cuponsArray
-    };
-    setSamboxLinks([...samboxLinks, newLink]);
-    setSamboxLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
-  };
-
   // Steam Links State
-  const [steamLinks, setSteamLinks] = useState([
-    { id: 1, nome: 'Steam Key - GTA V', valor: '49.90', link: 'https://checkout.exemplo.com/gtav', cupons: [] },
-    { id: 2, nome: 'Steam Key - Cyberpunk 2077', valor: '99.90', link: 'https://checkout.exemplo.com/cyberpunk', cupons: ['CYBER10'] },
-  ]);
-
+  const [steamLinks, setSteamLinks] = useState<QuickLink[]>([]);
   const [steamLinkFormData, setSteamLinkFormData] = useState({
     nome: '',
     valor: '',
@@ -451,12 +425,74 @@ export default function Dashboard() {
     cupons: ''
   });
 
+  // Fetch Links
+  React.useEffect(() => {
+    if (!isGerente) return; // Only gerentes can manage links
+    
+    const qSambox = query(collection(db, 'samboxLinks'), orderBy('createdAt', 'desc'));
+    const unsubscribeSambox = onSnapshot(qSambox, (snapshot) => {
+      const links = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as QuickLink[];
+      setSamboxLinks(links);
+    }, (error) => {
+      console.error('Error fetching samboxLinks:', error);
+    });
+
+    const qSteam = query(collection(db, 'steamLinks'), orderBy('createdAt', 'desc'));
+    const unsubscribeSteam = onSnapshot(qSteam, (snapshot) => {
+      const links = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as QuickLink[];
+      setSteamLinks(links);
+    }, (error) => {
+      console.error('Error fetching steamLinks:', error);
+    });
+
+    return () => {
+      unsubscribeSambox();
+      unsubscribeSteam();
+    };
+  }, [isGerente]);
+
+  const handleSamboxLinkInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setSamboxLinkFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSamboxLinkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cuponsArray = samboxLinkFormData.cupons
+      .split(',')
+      .map(c => c.trim())
+      .filter(c => c.length > 0);
+
+    const newLink = {
+      nome: samboxLinkFormData.nome,
+      valor: samboxLinkFormData.valor,
+      link: samboxLinkFormData.link,
+      cupons: cuponsArray,
+      createdAt: new Date().toISOString(),
+      createdBy: user?.email || 'unknown'
+    };
+    
+    try {
+      await addDoc(collection(db, 'samboxLinks'), newLink);
+      setSamboxLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
+    } catch (error) {
+      console.error('Error adding sambox link:', error);
+      alert('Erro ao adicionar link.');
+    }
+  };
+
   const handleSteamLinkInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setSteamLinkFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSteamLinkSubmit = (e: React.FormEvent) => {
+  const handleSteamLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Split comma-separated coupons into an array
@@ -466,27 +502,37 @@ export default function Dashboard() {
       .filter(c => c.length > 0);
 
     const newLink = {
-      id: Date.now(),
       nome: steamLinkFormData.nome,
       valor: steamLinkFormData.valor,
       link: steamLinkFormData.link,
-      cupons: cuponsArray
+      cupons: cuponsArray,
+      createdAt: new Date().toISOString(),
+      createdBy: user?.email || 'unknown'
     };
-    setSteamLinks([...steamLinks, newLink]);
-    setSteamLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
+    
+    try {
+      await addDoc(collection(db, 'steamLinks'), newLink);
+      setSteamLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
+    } catch (error) {
+      console.error('Error adding steam link:', error);
+      alert('Erro ao adicionar link.');
+    }
   };
 
   // Delete Link State
-  const [linkToDelete, setLinkToDelete] = useState<{id: number, type: 'sambox' | 'steam'} | null>(null);
+  const [linkToDelete, setLinkToDelete] = useState<{id: string, type: 'sambox' | 'steam'} | null>(null);
 
-  const confirmDeleteLink = () => {
+  const confirmDeleteLink = async () => {
     if (!linkToDelete) return;
-    if (linkToDelete.type === 'sambox') {
-      setSamboxLinks(prev => prev.filter(link => link.id !== linkToDelete.id));
-    } else {
-      setSteamLinks(prev => prev.filter(link => link.id !== linkToDelete.id));
+    
+    try {
+      const collectionName = linkToDelete.type === 'sambox' ? 'samboxLinks' : 'steamLinks';
+      await deleteDoc(doc(db, collectionName, linkToDelete.id));
+      setLinkToDelete(null);
+    } catch (error) {
+      console.error('Error deleting link:', error);
+      alert('Erro ao deletar link.');
     }
-    setLinkToDelete(null);
   };
 
   const generateZapLink = (e: React.FormEvent) => {
