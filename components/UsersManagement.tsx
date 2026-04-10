@@ -8,6 +8,7 @@ interface UserProfile {
   id: string;
   email: string;
   role: 'administrador' | 'gerente' | 'instalador';
+  status: 'pending' | 'approved' | 'rejected';
   createdAt: any;
 }
 
@@ -29,7 +30,12 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const usersData: UserProfile[] = [];
       snapshot.forEach((doc) => {
-        usersData.push({ id: doc.id, ...doc.data() } as UserProfile);
+        const data = doc.data();
+        usersData.push({ 
+          id: doc.id, 
+          ...data,
+          status: data.status || 'pending'
+        } as UserProfile);
       });
       setUsers(usersData);
       setLoading(false);
@@ -43,7 +49,6 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
   }, []);
 
   const handleRoleChange = async (userId: string, newRole: string) => {
-    // Gerente cannot promote to admin
     if (!isAdmin && newRole === 'administrador') {
       alert('Apenas administradores podem promover usuários a Administrador.');
       return;
@@ -57,8 +62,21 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
     }
   };
 
+  const handleStatusChange = async (userId: string, newStatus: string) => {
+    if (!isAdmin) {
+      alert('Apenas administradores podem aprovar ou rejeitar usuários.');
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'users', userId), { status: newStatus });
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao atualizar status do usuário.');
+    }
+  };
+
   const handleDeleteUser = async (userToDelete: UserProfile) => {
-    // Gerente can only delete installers
     if (!isAdmin && userToDelete.role !== 'instalador') {
       alert('Gerentes só podem excluir instaladores.');
       return;
@@ -89,7 +107,7 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
           <p className="font-bold text-blue-400 mb-1">Gestão de Equipe</p>
           <p>
             {isAdmin 
-              ? "Você tem controle total sobre os usuários do sistema." 
+              ? "Você tem controle total sobre os usuários do sistema. Novos usuários precisam ser aprovados." 
               : "Como Gerente, você pode gerenciar os instaladores da equipe."}
           </p>
         </div>
@@ -103,6 +121,7 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
             <thead className="bg-white/5 text-xs uppercase font-black tracking-wider text-gray-400">
               <tr>
                 <th className="px-6 py-4">Usuário</th>
+                <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Nível de Acesso</th>
                 <th className="px-6 py-4">Data de Cadastro</th>
                 <th className="px-6 py-4 text-right">Ações</th>
@@ -123,6 +142,31 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
                         <span>{u.email}</span>
                         {isSelf && <span className="text-[10px] text-blue-500 font-black uppercase tracking-widest">Você</span>}
                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      {isAdmin && !isSelf ? (
+                        <select
+                          value={u.status}
+                          onChange={(e) => handleStatusChange(u.id, e.target.value)}
+                          className={`bg-[#111111] border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 ${
+                            u.status === 'approved' ? 'text-emerald-500' :
+                            u.status === 'rejected' ? 'text-red-500' :
+                            'text-yellow-500'
+                          }`}
+                        >
+                          <option value="pending">Pendente</option>
+                          <option value="approved">Aprovado</option>
+                          <option value="rejected">Rejeitado</option>
+                        </select>
+                      ) : (
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                          u.status === 'approved' ? 'bg-emerald-500/10 text-emerald-500' :
+                          u.status === 'rejected' ? 'bg-red-500/10 text-red-500' :
+                          'bg-yellow-500/10 text-yellow-500'
+                        }`}>
+                          {u.status === 'approved' ? 'Aprovado' : u.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       {canEdit && !isSelf ? (

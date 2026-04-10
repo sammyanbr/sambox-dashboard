@@ -17,6 +17,14 @@
             "instalador"
           ]
         },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -25,6 +33,7 @@
       "required": [
         "email",
         "role",
+        "status",
         "createdAt"
       ]
     },
@@ -92,9 +101,40 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["nome", "valor", "link", "createdBy", "createdAt"]
+    },
+    "DespesaFixa": {
+      "title": "Despesa Fixa",
+      "description": "Fixed monthly expense",
+      "type": "object",
+      "properties": {
+        "descricao": { "type": "string" },
+        "valor": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["descricao", "valor", "createdAt"]
+    },
+    "Settings": {
+      "title": "System Settings",
+      "description": "Global system settings",
+      "type": "object",
+      "properties": {
+        "keyAuthSellerKey": { "type": "string" }
+      }
     }
   },
   "firestore": {
+    "/despesasFixas/{despesaId}": {
+      "schema": {
+        "$ref": "#/entities/DespesaFixa"
+      },
+      "description": "Fixed expenses"
+    },
+    "/settings/{settingId}": {
+      "schema": {
+        "$ref": "#/entities/Settings"
+      },
+      "description": "Global settings"
+    },
     "/samboxLinks/{linkId}": {
       "schema": {
         "$ref": "#/entities/QuickLink"

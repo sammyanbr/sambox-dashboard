@@ -45,17 +45,26 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let docExists = exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      return docExists ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
     }
 
     function hasRole(role) {
-      return isAuthenticated() && getUserData().role == role;
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.role == role;
     }
 
     function isAdmin() {
+      let data = getUserData();
       return isAuthenticated() &&
-        (getUserData().role == 'administrador' ||
+        ((data != null && data.role == 'administrador') ||
          request.auth.token.email == "sammyanbr@gmail.com" ||
+         request.auth.token.email == "zrpg01@gmail.com");
+    }
+
+    function isInitialAdminCreation() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "sammyanbr@gmail.com" ||
          request.auth.token.email == "zrpg01@gmail.com");
     }
 
@@ -64,10 +73,11 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      let allowedFields = ['email', 'role', 'createdAt', 'displayName'];
+      let allowedFields = ['email', 'role', 'status', 'createdAt', 'displayName'];
       return data.keys().hasOnly(allowedFields) &&
              data.email is string &&
              data.role in ['administrador', 'gerente', 'instalador'] &&
+             data.status in ['pending', 'approved', 'rejected'] &&
              data.createdAt is timestamp &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100));
     }
@@ -122,11 +132,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
-                    (request.resource.data.role == 'instalador' || isAdmin());
+                    (request.resource.data.role == 'instalador' || isInitialAdminCreation()) &&
+                    (request.resource.data.status == 'pending' || isInitialAdminCreation());
                     
       allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) &&
                     request.resource.data.createdAt == resource.data.createdAt &&
-                    (isOwner(userId) ? request.resource.data.role == resource.data.role : true);
+                    (isOwner(userId) ? request.resource.data.role == resource.data.role : true) &&
+                    (isOwner(userId) ? request.resource.data.status == resource.data.status : true);
                     
       allow delete: if isAdmin();
     }
@@ -162,6 +174,25 @@ service cloud.firestore {
       allow create: if isGerente() && isValidTransaction(request.resource.data);
       allow update: if isGerente() && isValidTransaction(request.resource.data);
       allow delete: if isGerente();
+    }
+
+    function isValidDespesaFixa(data) {
+      return data.keys().hasAll(['descricao', 'valor', 'createdAt']) &&
+             data.descricao is string &&
+             data.valor is number &&
+             data.createdAt is string;
+    }
+
+    match /despesasFixas/{despesaId} {
+      allow read: if isGerente();
+      allow create: if isGerente() && isValidDespesaFixa(request.resource.data);
+      allow update: if isGerente() && isValidDespesaFixa(request.resource.data);
+      allow delete: if isGerente();
+    }
+
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isGerente();
     }
 
     match /samboxLinks/{linkId} {

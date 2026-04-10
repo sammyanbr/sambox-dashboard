@@ -47,7 +47,8 @@ import {
   doc, 
   updateDoc,
   serverTimestamp,
-  Timestamp 
+  Timestamp,
+  setDoc
 } from 'firebase/firestore';
 import UsersManagement from './UsersManagement';
 
@@ -65,7 +66,7 @@ export default function Dashboard() {
   const { user, role, displayName, refreshProfile } = useAuth();
   const isAdmin = role === 'administrador' || user?.email === 'sammyanbr@gmail.com' || user?.email === 'zrpg01@gmail.com';
   const isGerente = role === 'gerente' || isAdmin;
-  const [activeMainTab, setActiveMainTab] = useState<'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil'>('instalacoes');
+  const [activeMainTab, setActiveMainTab] = useState<'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil'>('perfil');
   const [activeSubTab, setActiveSubTab] = useState<'novo' | 'historico' | 'zap' | 'vendas' | 'galeria'>('novo');
   const [isOthersDropdownOpen, setIsOthersDropdownOpen] = useState(false);
 
@@ -93,7 +94,7 @@ export default function Dashboard() {
   };
 
   // Financeiro State
-  const [despesasFixas, setDespesasFixas] = useState<{id: number, valor: number, descricao: string}[]>([]);
+  const [despesasFixas, setDespesasFixas] = useState<{id: string, valor: number, descricao: string}[]>([]);
   const [isEditingDespesas, setIsEditingDespesas] = useState(false);
   const [novaDespesa, setNovaDespesa] = useState({ valor: '', descricao: '' });
 
@@ -104,6 +105,79 @@ export default function Dashboard() {
 
   // KeyAuth State
   const [keyAuthSellerKey, setKeyAuthSellerKey] = useState('b01f1b891124badd9be270a3db589cf6');
+  const [isSavingSellerKey, setIsSavingSellerKey] = useState(false);
+
+  // Fetch Despesas Fixas and Settings
+  React.useEffect(() => {
+    // Fetch Settings (KeyAuth Seller Key) for all users so they can generate keys
+    const settingsRef = doc(db, 'settings', 'keyauth');
+    const unsubscribeSettings = onSnapshot(settingsRef, (docSnap) => {
+      if (docSnap.exists() && docSnap.data().keyAuthSellerKey) {
+        setKeyAuthSellerKey(docSnap.data().keyAuthSellerKey);
+      }
+    }, (error) => {
+      console.error('Error fetching settings:', error);
+    });
+
+    let unsubscribeDespesas = () => {};
+    
+    // Fetch Despesas Fixas only for gerentes
+    if (isGerente) {
+      const qDespesas = query(collection(db, 'despesasFixas'), orderBy('createdAt', 'desc'));
+      unsubscribeDespesas = onSnapshot(qDespesas, (snapshot) => {
+        const despesas = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as {id: string, valor: number, descricao: string}[];
+        setDespesasFixas(despesas);
+      }, (error) => {
+        console.error('Error fetching despesasFixas:', error);
+      });
+    }
+
+    return () => {
+      unsubscribeDespesas();
+      unsubscribeSettings();
+    };
+  }, [isGerente]);
+
+  const handleSaveSellerKey = async () => {
+    setIsSavingSellerKey(true);
+    try {
+      await setDoc(doc(db, 'settings', 'keyauth'), { keyAuthSellerKey }, { merge: true });
+      alert('Seller Key salva com sucesso!');
+    } catch (error) {
+      console.error('Error saving seller key:', error);
+      alert('Erro ao salvar Seller Key.');
+    } finally {
+      setIsSavingSellerKey(false);
+    }
+  };
+
+  const handleAddDespesaFixa = async () => {
+    if (novaDespesa.descricao && novaDespesa.valor) {
+      try {
+        await addDoc(collection(db, 'despesasFixas'), {
+          descricao: novaDespesa.descricao,
+          valor: Number(novaDespesa.valor),
+          createdAt: new Date().toISOString()
+        });
+        setNovaDespesa({ valor: '', descricao: '' });
+      } catch (error) {
+        console.error('Error adding despesa fixa:', error);
+        alert('Erro ao adicionar despesa fixa.');
+      }
+    }
+  };
+
+  const handleDeleteDespesaFixa = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'despesasFixas', id));
+    } catch (error) {
+      console.error('Error deleting despesa fixa:', error);
+      alert('Erro ao deletar despesa fixa.');
+    }
+  };
   const [keyAuthExpiry, setKeyAuthExpiry] = useState('30');
   const [keyAuthLevel, setKeyAuthLevel] = useState('1');
   const [keyAuthAmount, setKeyAuthAmount] = useState('1');
@@ -818,10 +892,10 @@ export default function Dashboard() {
         <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 font-display">
           <div>
             <h1 className="text-xl md:text-2xl font-black text-white mb-1 uppercase tracking-tight">
-              {activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : 'Links Zap'}
+              {activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : activeMainTab === 'perfil' ? 'Minha Conta' : 'Links Zap'}
             </h1>
             <p className="text-sm text-gray-500 font-medium">
-              {activeMainTab === 'financeiro' ? 'Controle de entradas e saídas em tempo real.' : activeMainTab === 'instalacoes' ? 'Registro e acompanhamento de novas instalações.' : activeMainTab === 'keys' ? 'Gerenciamento de chaves de ativação.' : activeMainTab === 'usuarios' ? 'Controle de acessos e permissões do sistema' : activeMainTab === 'videos' ? 'Galeria de tutoriais e treinamentos da equipe.' : 'Gerenciamento de links e ferramentas úteis.'}
+              {activeMainTab === 'financeiro' ? 'Controle de entradas e saídas em tempo real.' : activeMainTab === 'instalacoes' ? 'Registro e acompanhamento de novas instalações.' : activeMainTab === 'keys' ? 'Gerenciamento de chaves de ativação.' : activeMainTab === 'usuarios' ? 'Controle de acessos e permissões do sistema' : activeMainTab === 'videos' ? 'Galeria de tutoriais e treinamentos da equipe.' : activeMainTab === 'perfil' ? 'Gerencie seu perfil e configurações.' : 'Gerenciamento de links e ferramentas úteis.'}
             </p>
           </div>
           
@@ -932,7 +1006,7 @@ export default function Dashboard() {
                           <span className="text-gray-400 truncate max-w-[100px]">{d.descricao}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-red-400">-{formatCurrency(d.valor)}</span>
-                            <button onClick={() => setDespesasFixas(despesasFixas.filter(x => x.id !== d.id))} className="text-red-500 hover:text-red-400">
+                            <button onClick={() => handleDeleteDespesaFixa(d.id)} className="text-red-500 hover:text-red-400">
                               <Trash2 className="w-3 h-3" />
                             </button>
                           </div>
@@ -954,12 +1028,7 @@ export default function Dashboard() {
                           className="w-16 bg-black border border-white/10 rounded px-2 py-1 text-right text-white focus:outline-none focus:border-blue-500 text-[10px]"
                         />
                         <button 
-                          onClick={() => {
-                            if (novaDespesa.descricao && novaDespesa.valor) {
-                              setDespesasFixas([...despesasFixas, { id: Date.now(), valor: Number(novaDespesa.valor), descricao: novaDespesa.descricao }]);
-                              setNovaDespesa({ valor: '', descricao: '' });
-                            }
-                          }} 
+                          onClick={handleAddDespesaFixa} 
                           className="text-green-500 hover:text-green-400 bg-green-500/10 p-1 rounded transition-colors shrink-0"
                         >
                           <Plus className="w-3 h-3" />
@@ -1585,17 +1654,26 @@ export default function Dashboard() {
                   <div className="space-y-6">
                     <div>
                       <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Seller Key (KeyAuth)</label>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                          <Key className="h-4 w-4 text-gray-500" />
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <Key className="h-4 w-4 text-gray-500" />
+                          </div>
+                          <input 
+                            type="password" 
+                            placeholder="Insira sua Seller Key"
+                            value={keyAuthSellerKey}
+                            onChange={e => setKeyAuthSellerKey(e.target.value)}
+                            className="block w-full pl-11 pr-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                          />
                         </div>
-                        <input 
-                          type="password" 
-                          placeholder="Insira sua Seller Key"
-                          value={keyAuthSellerKey}
-                          onChange={e => setKeyAuthSellerKey(e.target.value)}
-                          className="block w-full pl-11 pr-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
-                        />
+                        <button
+                          onClick={handleSaveSellerKey}
+                          disabled={isSavingSellerKey}
+                          className="px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-colors disabled:opacity-50"
+                        >
+                          {isSavingSellerKey ? 'Salvando...' : 'Salvar'}
+                        </button>
                       </div>
                     </div>
 

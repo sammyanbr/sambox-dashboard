@@ -7,8 +7,8 @@ import { Activity, Mail, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('zrpg01@gmail.com');
-  const [password, setPassword] = useState('sam71083');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
