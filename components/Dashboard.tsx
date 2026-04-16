@@ -31,7 +31,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Video,
-  Play
+  Play,
+  X,
+  Percent,
+  Gamepad2
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { auth, db } from '../lib/firebase';
@@ -66,8 +69,42 @@ export default function Dashboard() {
   const { user, role, displayName, refreshProfile } = useAuth();
   const isAdmin = role === 'administrador' || user?.email === 'sammyanbr@gmail.com' || user?.email === 'zrpg01@gmail.com';
   const isGerente = role === 'gerente' || isAdmin;
-  const [activeMainTab, setActiveMainTab] = useState<'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil'>('perfil');
-  const [activeSubTab, setActiveSubTab] = useState<'novo' | 'historico' | 'zap' | 'vendas' | 'galeria'>('novo');
+  const isAfiliado = role === 'afiliado';
+  const [activeMainTab, setActiveMainTab] = useState<'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('activeMainTab');
+      if (saved) return saved as any;
+    }
+    return 'perfil';
+  });
+  const [activeSubTab, setActiveSubTab] = useState<'novo' | 'historico' | 'zap' | 'vendas' | 'galeria' | 'afiliados' | 'denuvo'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('activeSubTab');
+      if (saved) return saved as any;
+    }
+    return 'novo';
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('activeMainTab', activeMainTab);
+  }, [activeMainTab]);
+
+  React.useEffect(() => {
+    localStorage.setItem('activeSubTab', activeSubTab);
+  }, [activeSubTab]);
+
+  React.useEffect(() => {
+    if (isAfiliado) {
+      if (['financeiro', 'instalacoes', 'usuarios', 'videos'].includes(activeMainTab)) {
+        setActiveMainTab('others');
+        setActiveSubTab('afiliados');
+      }
+      if (activeMainTab === 'others' && ['zap', 'vendas'].includes(activeSubTab)) {
+        setActiveSubTab('afiliados');
+      }
+    }
+  }, [isAfiliado, activeMainTab, activeSubTab]);
+
   const [isOthersDropdownOpen, setIsOthersDropdownOpen] = useState(false);
 
   // Perfil State
@@ -182,7 +219,21 @@ export default function Dashboard() {
   const [keyAuthLevel, setKeyAuthLevel] = useState('1');
   const [keyAuthAmount, setKeyAuthAmount] = useState('1');
   const [keyAuthNote, setKeyAuthNote] = useState('');
+  const [keyAuthMask, setKeyAuthMask] = useState('SAMBOX-******');
   const [generatedKeys, setGeneratedKeys] = useState<{key: string, note: string, date: string}[]>([]);
+
+  const parseNote = (note: string) => {
+    if (!note) return { actualNote: '-', creator: '-' };
+    const parts = note.split(' | Por: ');
+    if (parts.length > 1) {
+      return { actualNote: parts[0] || '-', creator: parts[1] };
+    }
+    if (note.startsWith('Por: ')) {
+      return { actualNote: '-', creator: note.replace('Por: ', '') };
+    }
+    return { actualNote: note, creator: '-' };
+  };
+
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
   const [keyAuthError, setKeyAuthError] = useState('');
   const [isFetchingKeys, setIsFetchingKeys] = useState(false);
@@ -205,8 +256,11 @@ export default function Dashboard() {
     setKeyAuthError('');
     
     try {
+      const creatorName = user?.displayName || user?.email?.split('@')[0] || 'Desconhecido';
+      const finalNote = keyAuthNote ? `${keyAuthNote} | Por: ${creatorName}` : `Por: ${creatorName}`;
+
       // KeyAuth Seller API URL
-      const url = `https://keyauth.win/api/seller/?sellerkey=${keyAuthSellerKey}&type=add&expiry=${keyAuthExpiry}&mask=SAMBOX-******&level=${keyAuthLevel}&amount=${keyAuthAmount}&note=${encodeURIComponent(keyAuthNote)}&format=json`;
+      const url = `https://keyauth.win/api/seller/?sellerkey=${keyAuthSellerKey}&type=add&expiry=${keyAuthExpiry}&mask=${keyAuthMask}&level=${keyAuthLevel}&amount=${keyAuthAmount}&note=${encodeURIComponent(finalNote)}&format=json`;
       
       const response = await fetch(url);
       const data = await response.json();
@@ -216,7 +270,7 @@ export default function Dashboard() {
         const now = new Date().toISOString();
         const keyObjects = newKeys.map((k: string) => ({
           key: k,
-          note: keyAuthNote,
+          note: finalNote,
           date: now
         }));
         setGeneratedKeys(prev => [...keyObjects, ...prev]);
@@ -482,6 +536,42 @@ export default function Dashboard() {
     link: string;
     cupons: string[];
   }
+  interface AfiliadoOferta {
+    id: string;
+    titulo: string;
+    valorCupom: string;
+    cupons: string[];
+  }
+  interface DenuvoAccount {
+    id: string;
+    nome: string;
+    email: string;
+    createdAt: string;
+    createdBy: string;
+  }
+  interface DenuvoPrint {
+    id: string;
+    gameName: string;
+    imageUrl: string; 
+    createdAt: string;
+    createdBy: string;
+  }
+  interface DenuvoHistory {
+    id: string;
+    accountId: string;
+    accountName: string;
+    gameName: string;
+    createdByDisplayName: string;
+    createdAt: string;
+    createdBy: string;
+  }
+  const [afiliadoOfertas, setAfiliadoOfertas] = useState<AfiliadoOferta[]>([]);
+  const [afiliadoFormData, setAfiliadoFormData] = useState({
+    titulo: '',
+    valorCupom: '',
+    cupons: ''
+  });
+
   const [samboxLinks, setSamboxLinks] = useState<QuickLink[]>([]);
   const [samboxLinkFormData, setSamboxLinkFormData] = useState({
     nome: '',
@@ -499,10 +589,20 @@ export default function Dashboard() {
     cupons: ''
   });
 
+  // Denuvo Links State -> Updated to new structures
+  const [denuvoAccounts, setDenuvoAccounts] = useState<DenuvoAccount[]>([]);
+  const [denuvoPrints, setDenuvoPrints] = useState<DenuvoPrint[]>([]);
+  const [denuvoHistoryList, setDenuvoHistoryList] = useState<DenuvoHistory[]>([]);
+
+  const [denuvoAccountFormData, setDenuvoAccountFormData] = useState({ nome: '', email: '' });
+  const [denuvoPrintFormData, setDenuvoPrintFormData] = useState({ gameName: '', imageUrl: '' });
+  const [denuvoHistoryFormData, setDenuvoHistoryFormData] = useState({ gameName: '', accountId: '' });
+
+  const [denuvoTabMode, setDenuvoTabMode] = useState<'contas' | 'prints'>('contas');
+  const [isUploadingPrint, setIsUploadingPrint] = useState(false);
+
   // Fetch Links
   React.useEffect(() => {
-    if (!isGerente) return; // Only gerentes can manage links
-    
     const qSambox = query(collection(db, 'samboxLinks'), orderBy('createdAt', 'desc'));
     const unsubscribeSambox = onSnapshot(qSambox, (snapshot) => {
       const links = snapshot.docs.map(doc => ({
@@ -512,6 +612,7 @@ export default function Dashboard() {
       setSamboxLinks(links);
     }, (error) => {
       console.error('Error fetching samboxLinks:', error);
+      alert('Error fetching samboxLinks: ' + error.message);
     });
 
     const qSteam = query(collection(db, 'steamLinks'), orderBy('createdAt', 'desc'));
@@ -523,17 +624,97 @@ export default function Dashboard() {
       setSteamLinks(links);
     }, (error) => {
       console.error('Error fetching steamLinks:', error);
+      alert('Error fetching steamLinks: ' + error.message);
+    });
+
+    const qDenuvoAcc = query(collection(db, 'denuvoAccounts'), orderBy('createdAt', 'desc'));
+    const unsubscribeDenuvoAcc = onSnapshot(qDenuvoAcc, (snapshot) => {
+      const accounts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as DenuvoAccount[];
+      setDenuvoAccounts(accounts);
+    }, (error) => {
+      console.error('Error fetching denuvoAccounts:', error);
+    });
+
+    const qDenuvoPr = query(collection(db, 'denuvoPrints'), orderBy('gameName', 'asc'));
+    const unsubscribeDenuvoPr = onSnapshot(qDenuvoPr, (snapshot) => {
+      const prints = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as DenuvoPrint[];
+      setDenuvoPrints(prints);
+    }, (error) => {
+      console.error('Error fetching denuvoPrints:', error);
+    });
+
+    const qDenuvoHis = query(collection(db, 'denuvoHistory'), orderBy('createdAt', 'desc'));
+    const unsubscribeDenuvoHis = onSnapshot(qDenuvoHis, (snapshot) => {
+      const history = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as DenuvoHistory[];
+      setDenuvoHistoryList(history);
+    }, (error) => {
+      console.error('Error fetching denuvoHistory:', error);
+    });
+
+    const qAfiliado = query(collection(db, 'afiliadoOfertas'), orderBy('createdAt', 'desc'));
+    const unsubscribeAfiliado = onSnapshot(qAfiliado, (snapshot) => {
+      const ofertas = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as AfiliadoOferta[];
+      setAfiliadoOfertas(ofertas);
+    }, (error) => {
+      console.error('Error fetching afiliadoOfertas:', error);
+      alert('Error fetching afiliadoOfertas: ' + error.message);
     });
 
     return () => {
       unsubscribeSambox();
       unsubscribeSteam();
+      unsubscribeDenuvoAcc();
+      unsubscribeDenuvoPr();
+      unsubscribeDenuvoHis();
+      unsubscribeAfiliado();
     };
-  }, [isGerente]);
+  }, []);
 
   const handleSamboxLinkInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setSamboxLinkFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAfiliadoInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setAfiliadoFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleAfiliadoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const cuponsArray = afiliadoFormData.cupons
+      .split(',')
+      .map(c => c.trim())
+      .filter(c => c.length > 0);
+
+    const newOferta = {
+      titulo: afiliadoFormData.titulo,
+      valorCupom: afiliadoFormData.valorCupom,
+      cupons: cuponsArray,
+      createdAt: new Date().toISOString(),
+      createdBy: user?.email || 'unknown'
+    };
+    
+    try {
+      await addDoc(collection(db, 'afiliadoOfertas'), newOferta);
+      setAfiliadoFormData({ titulo: '', valorCupom: '', cupons: '' });
+    } catch (error) {
+      console.error('Error adding afiliado oferta:', error);
+      alert('Erro ao adicionar oferta de afiliado.');
+    }
   };
 
   const handleSamboxLinkSubmit = async (e: React.FormEvent) => {
@@ -593,14 +774,159 @@ export default function Dashboard() {
     }
   };
 
+  const handleDenuvoAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!denuvoAccountFormData.nome || !denuvoAccountFormData.email) return;
+
+    try {
+      await addDoc(collection(db, 'denuvoAccounts'), {
+        nome: denuvoAccountFormData.nome,
+        email: denuvoAccountFormData.email,
+        createdAt: new Date().toISOString(),
+        createdBy: user?.email || 'unknown'
+      });
+      setDenuvoAccountFormData({ nome: '', email: '' });
+    } catch (error) {
+      console.error('Error adding denuvo account:', error);
+      alert('Erro ao cadastrar conta Denuvo.');
+    }
+  };
+
+  const handleDenuvoPrintSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!denuvoPrintFormData.gameName || !denuvoPrintFormData.imageUrl) return;
+
+    try {
+      setIsUploadingPrint(true);
+      await addDoc(collection(db, 'denuvoPrints'), {
+        gameName: denuvoPrintFormData.gameName,
+        imageUrl: denuvoPrintFormData.imageUrl,
+        createdAt: new Date().toISOString(),
+        createdBy: user?.email || 'unknown'
+      });
+      setDenuvoPrintFormData({ gameName: '', imageUrl: '' });
+    } catch (error) {
+      console.error('Error adding denuvo print:', error);
+      alert('Erro ao cadastrar print.');
+    } finally {
+      setIsUploadingPrint(false);
+    }
+  };
+
+  const handleDenuvoHistorySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!denuvoHistoryFormData.accountId || !denuvoHistoryFormData.gameName) return;
+
+    const account = denuvoAccounts.find(a => a.id === denuvoHistoryFormData.accountId);
+    if (!account) return;
+
+    try {
+      await addDoc(collection(db, 'denuvoHistory'), {
+        accountId: account.id,
+        accountName: account.nome,
+        gameName: denuvoHistoryFormData.gameName,
+        createdByDisplayName: displayName || user?.email?.split('@')[0] || 'Unknown',
+        createdAt: new Date().toISOString(),
+        createdBy: user?.email || 'unknown'
+      });
+      setDenuvoHistoryFormData({ gameName: '', accountId: '' });
+    } catch (error) {
+      console.error('Error adding denuvo history:', error);
+      alert('Erro ao registrar histórico.');
+    }
+  };
+
+  const handlePrintImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6); // 60% quality jpeg to keep it small
+        setDenuvoPrintFormData(prev => ({ ...prev, imageUrl: dataUrl }));
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Delete Link State
-  const [linkToDelete, setLinkToDelete] = useState<{id: string, type: 'sambox' | 'steam'} | null>(null);
+  const [linkToDelete, setLinkToDelete] = useState<{id: string, type: 'sambox' | 'steam' | 'afiliado' | 'denuvo'} | null>(null);
+  
+  // Transaction Edit/Delete State
+  const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<any | null>(null);
+
+  const confirmDeleteTransaction = async () => {
+    if (!transactionToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'transactions', transactionToDelete));
+      setTransactionToDelete(null);
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      alert('Erro ao deletar registro financeiro.');
+    }
+  };
+
+  const handleEditTransactionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTransaction) return;
+    
+    const updatedTransaction = {
+      date: editingTransaction.date,
+      vendas: Number(editingTransaction.vendas) || 0,
+      pix: Number(editingTransaction.pix) || 0,
+      ads_facebook: Number(editingTransaction.ads_facebook) || 0,
+      ads_google: Number(editingTransaction.ads_google) || 0,
+      ads_tiktok: Number(editingTransaction.ads_tiktok) || 0,
+      extras: Number(editingTransaction.extras) || 0,
+      descricao_extra: editingTransaction.descricao_extra,
+    };
+    
+    try {
+      await updateDoc(doc(db, 'transactions', editingTransaction.id), updatedTransaction);
+      setEditingTransaction(null);
+    } catch (error) {
+      console.error('Error updating transaction:', error);
+      alert('Erro ao atualizar registro financeiro.');
+    }
+  };
 
   const confirmDeleteLink = async () => {
     if (!linkToDelete) return;
     
     try {
-      const collectionName = linkToDelete.type === 'sambox' ? 'samboxLinks' : 'steamLinks';
+      let collectionName = '';
+      if (linkToDelete.type === 'sambox') collectionName = 'samboxLinks';
+      else if (linkToDelete.type === 'steam') collectionName = 'steamLinks';
+      else if (linkToDelete.type === 'afiliado') collectionName = 'afiliadoOfertas';
+      else if (linkToDelete.type === 'denuvo') collectionName = 'denuvoLinks';
+
       await deleteDoc(doc(db, collectionName, linkToDelete.id));
       setLinkToDelete(null);
     } catch (error) {
@@ -784,8 +1110,8 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between py-2 md:h-20 gap-3 md:gap-4">
             <div className="flex items-center justify-between w-full md:w-auto">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.4)] shrink-0">
-                  <Activity className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
+                  <Image src="/samboxlogo.fw.png" alt="Sambox Logo" width={32} height={32} className="w-full h-full object-contain" />
                 </div>
                 <span className="text-base md:text-2xl font-black tracking-tighter text-white uppercase italic truncate">
                   Sambox <span className="text-blue-500 drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]">Dashboard</span>
@@ -817,46 +1143,66 @@ export default function Dashboard() {
 
             {/* Navigation Items - Better spacing and scroll */}
             <nav className="flex flex-wrap items-center gap-1 md:gap-2 py-1 md:py-0">
-              <button 
-                onClick={() => { setActiveMainTab('instalacoes'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); }}
-                className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'instalacoes' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
-              >
-                Instalações
-              </button>
+              {!isAfiliado && (
+                <button 
+                  onClick={() => { setActiveMainTab('instalacoes'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); }}
+                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'instalacoes' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
+                >
+                  Instalações
+                </button>
+              )}
               <button 
                 onClick={() => { setActiveMainTab('keys'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); }}
                 className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'keys' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
               >
                 Keys Steam
               </button>
-              <button 
-                onClick={() => { setActiveMainTab('videos'); setActiveSubTab('galeria'); setIsOthersDropdownOpen(false); }}
-                className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'videos' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
-              >
-                Vídeos
-              </button>
+              {!isAfiliado && (
+                <button 
+                  onClick={() => { setActiveMainTab('videos'); setActiveSubTab('galeria'); setIsOthersDropdownOpen(false); }}
+                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'videos' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
+                >
+                  Vídeos
+                </button>
+              )}
               
               <div className="relative">
                 <button 
                   onClick={() => setIsOthersDropdownOpen(!isOthersDropdownOpen)}
                   className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all flex items-center gap-1 ${activeMainTab === 'others' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
                 >
-                  Links Zap <Plus className={`w-3 h-3 transition-transform ${isOthersDropdownOpen ? 'rotate-45' : ''}`} />
+                  Outros <Plus className={`w-3 h-3 transition-transform ${isOthersDropdownOpen ? 'rotate-45' : ''}`} />
                 </button>
 
                 {isOthersDropdownOpen && (
                   <div className="absolute top-full right-0 mt-2 w-48 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
+                    {!isAfiliado && (
+                      <>
+                        <button 
+                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('zap'); setIsOthersDropdownOpen(false); }}
+                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2"
+                        >
+                          <MessageCircle className="w-3 h-3" /> Sambox
+                        </button>
+                        <button 
+                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('vendas'); setIsOthersDropdownOpen(false); }}
+                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 border-t border-white/5"
+                        >
+                          <DollarSign className="w-3 h-3" /> Sambox Steam
+                        </button>
+                        <button 
+                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsOthersDropdownOpen(false); }}
+                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 border-t border-white/5"
+                        >
+                          <Gamepad2 className="w-3 h-3" /> Denuvo
+                        </button>
+                      </>
+                    )}
                     <button 
-                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('zap'); setIsOthersDropdownOpen(false); }}
-                      className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2"
+                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('afiliados'); setIsOthersDropdownOpen(false); }}
+                      className={`w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 ${!isAfiliado ? 'border-t border-white/5' : ''}`}
                     >
-                      <MessageCircle className="w-3 h-3" /> Sambox
-                    </button>
-                    <button 
-                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('vendas'); setIsOthersDropdownOpen(false); }}
-                      className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 border-t border-white/5"
-                    >
-                      <DollarSign className="w-3 h-3" /> Sambox Steam
+                      <Percent className="w-3 h-3" /> Links Afiliados
                     </button>
                   </div>
                 )}
@@ -892,7 +1238,7 @@ export default function Dashboard() {
         <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 font-display">
           <div>
             <h1 className="text-xl md:text-2xl font-black text-white mb-1 uppercase tracking-tight">
-              {activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : activeMainTab === 'perfil' ? 'Minha Conta' : 'Links Zap'}
+              {activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : activeMainTab === 'perfil' ? 'Minha Conta' : 'Outros'}
             </h1>
             <p className="text-sm text-gray-500 font-medium">
               {activeMainTab === 'financeiro' ? 'Controle de entradas e saídas em tempo real.' : activeMainTab === 'instalacoes' ? 'Registro e acompanhamento de novas instalações.' : activeMainTab === 'keys' ? 'Gerenciamento de chaves de ativação.' : activeMainTab === 'usuarios' ? 'Controle de acessos e permissões do sistema' : activeMainTab === 'videos' ? 'Galeria de tutoriais e treinamentos da equipe.' : activeMainTab === 'perfil' ? 'Gerencie seu perfil e configurações.' : 'Gerenciamento de links e ferramentas úteis.'}
@@ -936,17 +1282,33 @@ export default function Dashboard() {
               </>
             ) : (
               <>
+                {!isAfiliado && (
+                  <>
+                    <button 
+                      onClick={() => setActiveSubTab('zap')}
+                      className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'zap' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                      Sambox
+                    </button>
+                    <button 
+                      onClick={() => setActiveSubTab('vendas')}
+                      className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'vendas' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                      Sambox Steam
+                    </button>
+                    <button 
+                      onClick={() => setActiveSubTab('denuvo')}
+                      className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'denuvo' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                      Denuvo
+                    </button>
+                  </>
+                )}
                 <button 
-                  onClick={() => setActiveSubTab('zap')}
-                  className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'zap' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                  onClick={() => setActiveSubTab('afiliados')}
+                  className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'afiliados' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                 >
-                  Sambox
-                </button>
-                <button 
-                  onClick={() => setActiveSubTab('vendas')}
-                  className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'vendas' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
-                >
-                  Sambox Steam
+                  Links Afiliados
                 </button>
               </>
             )}
@@ -1241,6 +1603,22 @@ export default function Dashboard() {
                                   <span className="font-black uppercase block mb-1">Observação:</span> {t.descricao_extra}
                                 </div>
                               )}
+                              <div className="flex gap-2 justify-end mt-4">
+                                <button
+                                  onClick={() => setEditingTransaction(t)}
+                                  className="p-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                  title="Editar Registro"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setTransactionToDelete(t.id)}
+                                  className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                  title="Apagar Registro"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
                           );
                         })
@@ -1263,12 +1641,13 @@ export default function Dashboard() {
                             <th className="px-6 py-6 text-rose-400">Instal (Déb)</th>
                             <th className="px-6 py-6">Extras</th>
                             <th className="px-6 py-6 text-right">Lucro</th>
+                            <th className="px-6 py-6 text-right">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/10">
                           {isFetchingTransactions ? (
                             <tr>
-                              <td colSpan={7} className="px-6 py-16 text-center">
+                              <td colSpan={8} className="px-6 py-16 text-center">
                                 <div className="flex flex-col items-center gap-3">
                                   <Activity className="w-8 h-8 text-blue-500 animate-spin" />
                                   <span className="text-xs font-black text-blue-500 uppercase tracking-widest animate-pulse">Carregando transações...</span>
@@ -1324,12 +1703,30 @@ export default function Dashboard() {
                                   <td className={`px-6 py-6 text-sm font-black text-right ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {formatCurrency(lucro)}
                                   </td>
+                                  <td className="px-6 py-6 text-right">
+                                    <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => setEditingTransaction(t)}
+                                        className="p-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                        title="Editar Registro"
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        onClick={() => setTransactionToDelete(t.id)}
+                                        className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                        title="Apagar Registro"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </td>
                                 </tr>
                               );
                             })
                           ) : (
                             <tr>
-                              <td colSpan={7} className="px-6 py-12 text-center text-gray-600 text-sm font-medium italic">
+                              <td colSpan={8} className="px-6 py-12 text-center text-gray-600 text-sm font-medium italic">
                                 Nenhum registro financeiro encontrado.
                               </td>
                             </tr>
@@ -1350,7 +1747,7 @@ export default function Dashboard() {
           </>
         )}
 
-        {activeMainTab === 'instalacoes' && (
+        {activeMainTab === 'instalacoes' && !isAfiliado && (
           <div className="grid grid-cols-1 gap-6 md:gap-8">
             {/* Resumo Instalações */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-2">
@@ -1652,30 +2049,32 @@ export default function Dashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   {/* Configurações */}
                   <div className="space-y-6">
-                    <div>
-                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Seller Key (KeyAuth)</label>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
-                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                            <Key className="h-4 w-4 text-gray-500" />
+                    {isGerente && (
+                      <div>
+                        <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Seller Key (KeyAuth)</label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                              <Key className="h-4 w-4 text-gray-500" />
+                            </div>
+                            <input 
+                              type="password" 
+                              placeholder="Insira sua Seller Key"
+                              value={keyAuthSellerKey}
+                              onChange={e => setKeyAuthSellerKey(e.target.value)}
+                              className="block w-full pl-11 pr-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                            />
                           </div>
-                          <input 
-                            type="password" 
-                            placeholder="Insira sua Seller Key"
-                            value={keyAuthSellerKey}
-                            onChange={e => setKeyAuthSellerKey(e.target.value)}
-                            className="block w-full pl-11 pr-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
-                          />
+                          <button
+                            onClick={handleSaveSellerKey}
+                            disabled={isSavingSellerKey}
+                            className="px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-colors disabled:opacity-50"
+                          >
+                            {isSavingSellerKey ? 'Salvando...' : 'Salvar'}
+                          </button>
                         </div>
-                        <button
-                          onClick={handleSaveSellerKey}
-                          disabled={isSavingSellerKey}
-                          className="px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm transition-colors disabled:opacity-50"
-                        >
-                          {isSavingSellerKey ? 'Salvando...' : 'Salvar'}
-                        </button>
                       </div>
-                    </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -1700,6 +2099,22 @@ export default function Dashboard() {
                           value={keyAuthLevel}
                           onChange={e => setKeyAuthLevel(e.target.value)}
                           className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500 transition-all text-sm text-center"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Prefixo / Máscara (License Mask)</label>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                          <Key className="h-4 w-4 text-gray-500" />
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="SAMBOX-******"
+                          value={keyAuthMask}
+                          onChange={e => setKeyAuthMask(e.target.value)}
+                          className="block w-full pl-11 pr-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
                         />
                       </div>
                     </div>
@@ -1759,9 +2174,14 @@ export default function Dashboard() {
                                   <Copy className="w-3 h-3" />
                                 </button>
                               </div>
-                              {k.note && (
-                                <p className="text-[10px] text-gray-500 truncate font-medium">{k.note}</p>
-                              )}
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-gray-500 truncate font-medium">{parseNote(k.note).actualNote}</p>
+                                {parseNote(k.note).creator !== '-' && (
+                                  <p className="text-[9px] text-blue-500/80 truncate font-bold uppercase tracking-wider">
+                                    Gerado por: {parseNote(k.note).creator}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ))}
                           {generatedKeys.length > 5 && (
@@ -1850,7 +2270,14 @@ export default function Dashboard() {
                               <code className="text-blue-400 font-mono text-xs font-bold">{k.key}</code>
                             </td>
                             <td className="px-6 py-4 text-xs text-gray-400 font-medium truncate max-w-[200px]">
-                              {k.note || '-'}
+                              <div className="flex flex-col gap-1">
+                                <span>{parseNote(k.note).actualNote}</span>
+                                {parseNote(k.note).creator !== '-' && (
+                                  <span className="text-[9px] text-blue-500/80 font-bold uppercase tracking-wider">
+                                    Gerado por: {parseNote(k.note).creator}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-right space-x-2">
                               <button 
@@ -1860,13 +2287,15 @@ export default function Dashboard() {
                               >
                                 <Copy className="w-3.5 h-3.5" />
                               </button>
-                              <button 
-                                onClick={() => setKeyToDeleteAuth(k.key)}
-                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all"
-                                title="Deletar Key"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {isGerente && (
+                                <button 
+                                  onClick={() => setKeyToDeleteAuth(k.key)}
+                                  className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-all"
+                                  title="Deletar Key"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -1902,12 +2331,14 @@ export default function Dashboard() {
                             >
                               <Copy className="w-3.5 h-3.5" />
                             </button>
-                            <button 
-                              onClick={() => setKeyToDeleteAuth(k.key)}
-                              className="p-2 rounded-lg bg-red-500/10 text-red-500"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {isGerente && (
+                              <button 
+                                onClick={() => setKeyToDeleteAuth(k.key)}
+                                className="p-2 rounded-lg bg-red-500/10 text-red-500"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                         <div>
@@ -1916,7 +2347,14 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <p className="text-[10px] text-gray-600 font-black uppercase tracking-widest mb-1">Nota (Email)</p>
-                          <p className="text-xs text-gray-400 font-medium">{k.note || '-'}</p>
+                          <div className="flex flex-col gap-1">
+                            <p className="text-xs text-gray-400 font-medium">{parseNote(k.note).actualNote}</p>
+                            {parseNote(k.note).creator !== '-' && (
+                              <p className="text-[9px] text-blue-500/80 font-bold uppercase tracking-wider">
+                                Gerado por: {parseNote(k.note).creator}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))
@@ -2054,13 +2492,15 @@ export default function Dashboard() {
                             <p className="text-blue-500 font-black text-lg mt-1">{formatCurrency(Number(item.valor))}</p>
                           </div>
                           <div className="flex gap-2">
-                            <button
-                              onClick={() => setLinkToDelete({ id: item.id, type: 'sambox' })}
-                              className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
-                              title="Apagar Link"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {isGerente && (
+                              <button
+                                onClick={() => setLinkToDelete({ id: item.id, type: 'sambox' })}
+                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                title="Apagar Link"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                             <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
                               <DollarSign className="w-4 h-4" />
                             </div>
@@ -2100,71 +2540,73 @@ export default function Dashboard() {
                   </div>
 
                   {/* Registration Form */}
-                  <div className="border-t border-white/10 pt-8">
-                    <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
-                    <form onSubmit={handleSamboxLinkSubmit} className="space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        <div>
-                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nome do Link</label>
-                          <input 
-                            type="text" 
-                            name="nome"
-                            value={samboxLinkFormData.nome}
-                            onChange={handleSamboxLinkInputChange}
-                            placeholder="Ex: Plano Mensal"
-                            required
-                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                          />
+                  {isGerente && (
+                    <div className="border-t border-white/10 pt-8">
+                      <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
+                      <form onSubmit={handleSamboxLinkSubmit} className="space-y-5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <div>
+                            <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nome do Link</label>
+                            <input 
+                              type="text" 
+                              name="nome"
+                              value={samboxLinkFormData.nome}
+                              onChange={handleSamboxLinkInputChange}
+                              placeholder="Ex: Plano Mensal"
+                              required
+                              className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Valor (R$)</label>
+                            <input 
+                              type="number" 
+                              step="0.01"
+                              name="valor"
+                              value={samboxLinkFormData.valor}
+                              onChange={handleSamboxLinkInputChange}
+                              placeholder="0.00"
+                              required
+                              className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Valor (R$)</label>
-                          <input 
-                            type="number" 
-                            step="0.01"
-                            name="valor"
-                            value={samboxLinkFormData.valor}
-                            onChange={handleSamboxLinkInputChange}
-                            placeholder="0.00"
-                            required
-                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                          />
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <div>
+                            <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">URL do Link</label>
+                            <input 
+                              type="url" 
+                              name="link"
+                              value={samboxLinkFormData.link}
+                              onChange={handleSamboxLinkInputChange}
+                              placeholder="https://..."
+                              required
+                              className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
+                            <input 
+                              type="text" 
+                              name="cupons"
+                              value={samboxLinkFormData.cupons}
+                              onChange={handleSamboxLinkInputChange}
+                              placeholder="Ex: DESC10, PROMO20"
+                              className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
+                            />
+                          </div>
                         </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        <div>
-                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">URL do Link</label>
-                          <input 
-                            type="url" 
-                            name="link"
-                            value={samboxLinkFormData.link}
-                            onChange={handleSamboxLinkInputChange}
-                            placeholder="https://..."
-                            required
-                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
-                          <input 
-                            type="text" 
-                            name="cupons"
-                            value={samboxLinkFormData.cupons}
-                            onChange={handleSamboxLinkInputChange}
-                            placeholder="Ex: DESC10, PROMO20"
-                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
-                          />
-                        </div>
-                      </div>
 
-                      <button 
-                        type="submit"
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
-                      >
-                        CADASTRAR LINK
-                      </button>
-                    </form>
-                  </div>
+                        <button 
+                          type="submit"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                        >
+                          CADASTRAR LINK
+                        </button>
+                      </form>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-white/10 pt-8">
@@ -2252,13 +2694,15 @@ export default function Dashboard() {
                           <p className="text-blue-500 font-black text-lg mt-1">{formatCurrency(Number(item.valor))}</p>
                         </div>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => setLinkToDelete({ id: item.id, type: 'steam' })}
-                            className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
-                            title="Apagar Link"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {isGerente && (
+                            <button
+                              onClick={() => setLinkToDelete({ id: item.id, type: 'steam' })}
+                              className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                              title="Apagar Link"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                           <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
                             <DollarSign className="w-4 h-4" />
                           </div>
@@ -2298,71 +2742,325 @@ export default function Dashboard() {
                 </div>
 
                 {/* Registration Form */}
-                <div className="border-t border-white/10 pt-8">
-                  <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
-                  <form onSubmit={handleSteamLinkSubmit} className="space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <div>
-                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nome do Link</label>
-                        <input 
-                          type="text" 
-                          name="nome"
-                          value={steamLinkFormData.nome}
-                          onChange={handleSteamLinkInputChange}
-                          placeholder="Ex: Steam Key - Jogo X"
-                          required
-                          className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                        />
+                {isGerente && (
+                  <div className="border-t border-white/10 pt-8">
+                    <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
+                    <form onSubmit={handleSteamLinkSubmit} className="space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nome do Link</label>
+                          <input 
+                            type="text" 
+                            name="nome"
+                            value={steamLinkFormData.nome}
+                            onChange={handleSteamLinkInputChange}
+                            placeholder="Ex: Steam Key - Jogo X"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Valor (R$)</label>
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            name="valor"
+                            value={steamLinkFormData.valor}
+                            onChange={handleSteamLinkInputChange}
+                            placeholder="0.00"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                          />
+                        </div>
                       </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">URL do Link</label>
+                          <input 
+                            type="url" 
+                            name="link"
+                            value={steamLinkFormData.link}
+                            onChange={handleSteamLinkInputChange}
+                            placeholder="https://..."
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
+                          <input 
+                            type="text" 
+                            name="cupons"
+                            value={steamLinkFormData.cupons}
+                            onChange={handleSteamLinkInputChange}
+                            placeholder="Ex: DESC10, PROMO20"
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
+                          />
+                        </div>
+                      </div>
+
+                      <button 
+                        type="submit"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                      >
+                        CADASTRAR LINK
+                      </button>
+                    </form>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeSubTab === 'denuvo' && (
+              <div className="bg-[#111111] rounded-2xl p-6 md:p-8 border border-white/10 shadow-2xl flex flex-col gap-8">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
+                    Denuvo Management
+                  </h2>
+                  
+                  <div className="flex gap-4 mb-8">
+                    <button onClick={() => setDenuvoTabMode('contas')} className={`px-4 py-2 font-black uppercase text-xs rounded-lg transition-colors ${denuvoTabMode === 'contas' ? 'bg-blue-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Contas e Histórico</button>
+                    <button onClick={() => setDenuvoTabMode('prints')} className={`px-4 py-2 font-black uppercase text-xs rounded-lg transition-colors ${denuvoTabMode === 'prints' ? 'bg-blue-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>Prints</button>
+                  </div>
+
+                  {denuvoTabMode === 'contas' && (
+                    <div className="flex flex-col gap-10">
+                      {/* Contas List & Usage Form */}
                       <div>
-                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Valor (R$)</label>
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          name="valor"
-                          value={steamLinkFormData.valor}
-                          onChange={handleSteamLinkInputChange}
-                          placeholder="0.00"
-                          required
-                          className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                        />
+                        <h3 className="text-base font-bold text-white mb-4 uppercase tracking-widest">Contas de E-mail</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {denuvoAccounts.map((acc) => (
+                            <div key={acc.id} className="bg-[#080808] border border-white/5 rounded-xl p-5 flex flex-col gap-4 relative">
+                              <div>
+                                <h4 className="text-sm font-black text-white uppercase tracking-tight mb-1">{acc.nome}</h4>
+                                <p className="text-gray-400 text-sm">{acc.email}</p>
+                              </div>
+                              <form 
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  handleDenuvoHistorySubmit(e);
+                                }}
+                                className="flex gap-2"
+                              >
+                                <input 
+                                  type="text" 
+                                  placeholder="Nome do Jogo" 
+                                  required
+                                  value={denuvoHistoryFormData.accountId === acc.id ? denuvoHistoryFormData.gameName : ''}
+                                  onChange={(e) => setDenuvoHistoryFormData({ accountId: acc.id, gameName: e.target.value })}
+                                  className="w-full bg-[#111] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-600"
+                                />
+                                <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg text-xs font-black uppercase whitespace-nowrap">Usar</button>
+                              </form>
+                            </div>
+                          ))}
+                          {denuvoAccounts.length === 0 && (
+                            <div className="col-span-full text-center py-4 text-gray-500 text-sm font-medium">Nenhuma conta cadastrada.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Histórico */}
+                      <div>
+                        <h3 className="text-base font-bold text-white mb-4 uppercase tracking-widest">Histórico de Uso</h3>
+                        <div className="bg-[#080808] rounded-xl border border-white/5 overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left whitespace-nowrap">
+                              <thead className="bg-white/5">
+                                <tr>
+                                  <th className="p-4 text-xs font-black text-gray-400 uppercase">Conta</th>
+                                  <th className="p-4 text-xs font-black text-gray-400 uppercase">Jogo</th>
+                                  <th className="p-4 text-xs font-black text-gray-400 uppercase">Usuário</th>
+                                  <th className="p-4 text-xs font-black text-gray-400 uppercase">Data</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5 text-sm cursor-default">
+                                {denuvoHistoryList.map(item => (
+                                  <tr key={item.id} className="hover:bg-white/5 transition-colors text-gray-300">
+                                    <td className="p-4">{item.accountName}</td>
+                                    <td className="p-4">{item.gameName}</td>
+                                    <td className="p-4">{item.createdByDisplayName}</td>
+                                    <td className="p-4">{new Date(item.createdAt).toLocaleString('pt-BR')}</td>
+                                  </tr>
+                                ))}
+                                {denuvoHistoryList.length === 0 && (
+                                  <tr>
+                                    <td colSpan={4} className="p-4 text-center text-gray-500">Nenhum histórico encontrado.</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Cadastrar Conta Form */}
+                      {isGerente && (
+                        <div className="border-t border-white/10 pt-6">
+                           <h3 className="text-base font-bold text-white mb-4 uppercase tracking-widest">Cadastrar Nova Conta</h3>
+                           <form onSubmit={handleDenuvoAccountSubmit} className="flex flex-col md:flex-row gap-4">
+                             <input type="text" placeholder="Nome da Conta (ex: Conta 1)" value={denuvoAccountFormData.nome} onChange={e => setDenuvoAccountFormData(p => ({...p, nome: e.target.value}))} required className="flex-1 bg-[#080808] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600" />
+                             <input type="email" placeholder="Email" value={denuvoAccountFormData.email} onChange={e => setDenuvoAccountFormData(p => ({...p, email: e.target.value}))} required className="flex-1 bg-[#080808] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600" />
+                             <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase px-8 py-3 rounded-xl transition-all">Adicionar</button>
+                           </form>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {denuvoTabMode === 'prints' && (
+                    <div className="flex flex-col gap-10">
+                      <div>
+                        <h3 className="text-base font-bold text-white mb-4 uppercase tracking-widest">Galeria de Prints</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                          {denuvoPrints.map(print => (
+                            <div key={print.id} className="bg-[#080808] border border-white/5 rounded-xl overflow-hidden flex flex-col group">
+                              <div className="h-40 bg-[#111] overflow-hidden relative">
+                                <img src={print.imageUrl} alt={print.gameName} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                              </div>
+                              <div className="p-4 flex items-center justify-between">
+                                <h4 className="text-sm font-black text-white uppercase tracking-tight">{print.gameName}</h4>
+                                <a href={print.imageUrl} download={`${print.gameName}-print.jpg`} className="p-2 bg-blue-600/10 text-blue-500 rounded-lg hover:bg-blue-600 hover:text-white transition-colors" title="Baixar Print">
+                                  <Download className="w-4 h-4" />
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                          {denuvoPrints.length === 0 && (
+                            <div className="col-span-full text-center py-8 text-gray-500 text-sm font-medium">Nenhum print cadastrado.</div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Cadastrar Print */}
+                      <div className="border-t border-white/10 pt-6">
+                        <h3 className="text-base font-bold text-white mb-4 uppercase tracking-widest">Enviar Print</h3>
+                        <form onSubmit={handleDenuvoPrintSubmit} className="flex flex-col gap-4">
+                          <input type="text" placeholder="Nome do Jogo" required value={denuvoPrintFormData.gameName} onChange={e => setDenuvoPrintFormData(p => ({...p, gameName: e.target.value}))} className="w-full md:w-1/2 bg-[#080808] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600" />
+                          <div className="flex items-center gap-4">
+                            <label className="bg-white/5 hover:bg-white/10 border border-white/10 text-white px-6 py-3 rounded-xl cursor-pointer transition-colors text-sm font-black uppercase flex items-center gap-2">
+                              <span>Escolher Imagem</span>
+                              <input type="file" accept="image/*" onChange={handlePrintImageChange} className="hidden" />
+                            </label>
+                            {denuvoPrintFormData.imageUrl && <span className="text-emerald-500 text-xs font-bold uppercase">✓ Imagem carregada</span>}
+                          </div>
+                          <button type="submit" disabled={isUploadingPrint || !denuvoPrintFormData.gameName || !denuvoPrintFormData.imageUrl} className="w-full md:w-1/2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm uppercase px-8 py-3 rounded-xl transition-all">
+                            {isUploadingPrint ? 'Enviando...' : 'Cadastrar Print'}
+                          </button>
+                        </form>
                       </div>
                     </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      <div>
-                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">URL do Link</label>
-                        <input 
-                          type="url" 
-                          name="link"
-                          value={steamLinkFormData.link}
-                          onChange={handleSteamLinkInputChange}
-                          placeholder="https://..."
-                          required
-                          className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
-                        />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'afiliados' && (
+              <div className="bg-[#111111] rounded-2xl p-6 md:p-8 border border-white/10 shadow-2xl flex flex-col gap-12">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
+                    Cupons para Afiliados
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+                    {afiliadoOfertas.length > 0 ? (
+                      afiliadoOfertas.map((item) => (
+                        <div key={item.id} className="bg-[#080808] border border-white/5 rounded-xl p-5 flex flex-col gap-3 hover:border-blue-500/30 transition-all group">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="text-sm font-black text-white uppercase tracking-tight">{item.titulo}</h4>
+                              <p className="text-blue-500 font-black text-lg mt-1">{item.valorCupom}</p>
+                            </div>
+                            {isGerente && (
+                              <button
+                                onClick={() => setLinkToDelete({ id: item.id, type: 'afiliado' })}
+                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                title="Apagar Oferta"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="mt-2 flex flex-col gap-2">
+                            {item.cupons.map((cupom, cIdx) => (
+                              <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
+                                <span>Cupom: {cupom}</span>
+                                <button 
+                                  onClick={() => copyToClipboard(cupom)}
+                                  className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded-md"
+                                  title="Copiar Cupom"
+                                >
+                                  <Copy className="w-3 h-3" /> Copiar
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-full text-center py-8 text-gray-500 text-sm font-medium italic">
+                        Nenhum cupom disponível no momento.
                       </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Registration Form */}
+                {isGerente && (
+                  <div className="border-t border-white/10 pt-8">
+                    <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Nova Oferta para Afiliados</h3>
+                    <form onSubmit={handleAfiliadoSubmit} className="space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Título da Oferta</label>
+                          <input 
+                            type="text" 
+                            name="titulo"
+                            value={afiliadoFormData.titulo}
+                            onChange={handleAfiliadoInputChange}
+                            placeholder="Ex: Sambox 1 Mês"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Valor do Cupom</label>
+                          <input 
+                            type="text" 
+                            name="valorCupom"
+                            value={afiliadoFormData.valorCupom}
+                            onChange={handleAfiliadoInputChange}
+                            placeholder="Ex: R$ 10,00 ou 10%"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
+                          />
+                        </div>
+                      </div>
+                      
                       <div>
-                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
+                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nomes dos Cupons (separados por vírgula)</label>
                         <input 
                           type="text" 
                           name="cupons"
-                          value={steamLinkFormData.cupons}
-                          onChange={handleSteamLinkInputChange}
-                          placeholder="Ex: DESC10, PROMO20"
+                          value={afiliadoFormData.cupons}
+                          onChange={handleAfiliadoInputChange}
+                          placeholder="Ex: PROMO10, SAMBOX10"
+                          required
                           className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
                         />
                       </div>
-                    </div>
 
-                    <button 
-                      type="submit"
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
-                    >
-                      CADASTRAR LINK
-                    </button>
-                  </form>
-                </div>
+                      <button 
+                        type="submit"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                      >
+                        CADASTRAR OFERTA
+                      </button>
+                    </form>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2704,7 +3402,168 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal de Confirmação de Exclusão */}
+      {/* Modal de Edição de Transação */}
+      {editingTransaction && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-8">
+            <div className="p-6 md:p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-black text-white uppercase tracking-widest flex items-center gap-3">
+                  <Edit2 className="w-6 h-6 text-blue-500" />
+                  Editar Registro Financeiro
+                </h3>
+                <button 
+                  onClick={() => setEditingTransaction(null)}
+                  className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleEditTransactionSubmit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Data</label>
+                    <input 
+                      type="date" 
+                      value={editingTransaction.date}
+                      onChange={e => setEditingTransaction({...editingTransaction, date: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500 transition-all text-sm"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Vendas (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.vendas}
+                      onChange={e => setEditingTransaction({...editingTransaction, vendas: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-blue-400 uppercase tracking-widest ml-1">Pix (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.pix}
+                      onChange={e => setEditingTransaction({...editingTransaction, pix: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-blue-500/30 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Ads Facebook (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.ads_facebook}
+                      onChange={e => setEditingTransaction({...editingTransaction, ads_facebook: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Ads Google (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.ads_google}
+                      onChange={e => setEditingTransaction({...editingTransaction, ads_google: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Ads TikTok (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.ads_tiktok}
+                      onChange={e => setEditingTransaction({...editingTransaction, ads_tiktok: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Extras (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={editingTransaction.extras}
+                      onChange={e => setEditingTransaction({...editingTransaction, extras: e.target.value})}
+                      className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Descrição do Extra</label>
+                  <textarea 
+                    value={editingTransaction.descricao_extra}
+                    onChange={e => setEditingTransaction({...editingTransaction, descricao_extra: e.target.value})}
+                    rows={3}
+                    className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-all text-sm resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-white/10">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingTransaction(null)}
+                    className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-blue-500/20"
+                  >
+                    Salvar Alterações
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão de Transação */}
+      {transactionToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Apagar Registro?</h3>
+              <p className="text-sm text-gray-400 mb-6">
+                Esta ação não pode ser desfeita. O registro financeiro será removido permanentemente.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setTransactionToDelete(null)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white text-xs font-bold rounded-xl transition-all"
+                >
+                  CANCELAR
+                </button>
+                <button 
+                  onClick={confirmDeleteTransaction}
+                  className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-red-500/20"
+                >
+                  APAGAR
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão de Link */}
       {linkToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">

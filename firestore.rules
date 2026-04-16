@@ -76,9 +76,9 @@ service cloud.firestore {
       let allowedFields = ['email', 'role', 'status', 'createdAt', 'displayName'];
       return data.keys().hasOnly(allowedFields) &&
              data.email is string &&
-             data.role in ['administrador', 'gerente', 'instalador'] &&
+             data.role in ['administrador', 'gerente', 'instalador', 'afiliado'] &&
              data.status in ['pending', 'approved', 'rejected'] &&
-             data.createdAt is timestamp &&
+             (data.createdAt is timestamp || data.createdAt is string) &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100));
     }
 
@@ -135,19 +135,21 @@ service cloud.firestore {
                     (request.resource.data.role == 'instalador' || isInitialAdminCreation()) &&
                     (request.resource.data.status == 'pending' || isInitialAdminCreation());
                     
-      allow update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) &&
-                    request.resource.data.createdAt == resource.data.createdAt &&
-                    (isOwner(userId) ? request.resource.data.role == resource.data.role : true) &&
-                    (isOwner(userId) ? request.resource.data.status == resource.data.status : true);
+      allow update: if (isOwner(userId) || isAdmin() || isGerente()) && 
+                    isValidUser(request.resource.data) &&
+                    (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt) &&
+                    (!isAdmin() ? request.resource.data.status == resource.data.status : true) &&
+                    (!isAdmin() ? (resource.data.role != 'administrador' && request.resource.data.role != 'administrador') : true) &&
+                    (!isAdmin() && !isGerente() ? request.resource.data.role == resource.data.role : true);
                     
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (isGerente() && resource.data.role in ['instalador', 'afiliado']);
     }
 
     match /videos/{videoId} {
       allow read: if isAuthenticated();
       allow create: if isGerente() && isValidVideo(request.resource.data);
       allow update: if isGerente() && isValidVideo(request.resource.data);
-      allow delete: if isAdmin();
+      allow delete: if isGerente();
     }
 
     match /installations/{installationId} {
@@ -206,6 +208,42 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isGerente() && isValidQuickLink(request.resource.data);
       allow update: if isGerente() && isValidQuickLink(request.resource.data);
+      allow delete: if isGerente();
+    }
+
+    match /denuvoAccounts/{accountId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente();
+      allow update: if isGerente();
+      allow delete: if isGerente();
+    }
+
+    match /denuvoPrints/{printId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente();
+      allow update: if isGerente();
+      allow delete: if isGerente();
+    }
+
+    match /denuvoHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isGerente();
+    }
+    function isValidAfiliadoOferta(data) {
+      return data.keys().hasAll(['titulo', 'valorCupom', 'cupons', 'createdBy', 'createdAt']) &&
+             data.titulo is string &&
+             data.valorCupom is string &&
+             data.cupons is list &&
+             data.createdBy is string &&
+             data.createdAt is string;
+    }
+
+    match /afiliadoOfertas/{ofertaId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidAfiliadoOferta(request.resource.data);
+      allow update: if isGerente() && isValidAfiliadoOferta(request.resource.data);
       allow delete: if isGerente();
     }
   }

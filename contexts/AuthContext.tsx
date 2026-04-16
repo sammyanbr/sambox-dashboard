@@ -5,7 +5,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
-export type UserRole = 'administrador' | 'gerente' | 'instalador';
+export type UserRole = 'administrador' | 'gerente' | 'instalador' | 'afiliado';
 export type UserStatus = 'pending' | 'approved' | 'rejected';
 
 interface AuthContextType {
@@ -49,7 +49,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         setDisplayName(dbDisplayName);
         if (isMaster && (dbRole !== 'administrador' || dbStatus !== 'approved')) {
-          await setDoc(userDocRef, { role: 'administrador', status: 'approved' }, { merge: true });
+          await setDoc(userDocRef, { 
+            role: 'administrador', 
+            status: 'approved',
+            email: currentUser.email,
+            displayName: dbDisplayName,
+            createdAt: data.createdAt || serverTimestamp()
+          }, { merge: true });
           setRole('administrador');
           setStatus('approved');
         } else {

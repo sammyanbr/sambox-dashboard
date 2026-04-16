@@ -7,7 +7,7 @@ import { Shield, User, Trash2, Info } from 'lucide-react';
 interface UserProfile {
   id: string;
   email: string;
-  role: 'administrador' | 'gerente' | 'instalador';
+  role: 'administrador' | 'gerente' | 'instalador' | 'afiliado';
   status: 'pending' | 'approved' | 'rejected';
   createdAt: any;
 }
@@ -77,8 +77,8 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
   };
 
   const handleDeleteUser = async (userToDelete: UserProfile) => {
-    if (!isAdmin && userToDelete.role !== 'instalador') {
-      alert('Gerentes só podem excluir instaladores.');
+    if (!isAdmin && userToDelete.role !== 'instalador' && userToDelete.role !== 'afiliado') {
+      alert('Gerentes só podem excluir instaladores e afiliados.');
       return;
     }
 
@@ -129,7 +129,7 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
             </thead>
             <tbody className="divide-y divide-white/5">
               {users.map((u) => {
-                const canEdit = isAdmin || (isGerente && u.role === 'instalador');
+                const canEdit = isAdmin || (isGerente && (u.role === 'instalador' || u.role === 'afiliado'));
                 const isSelf = u.email === currentUserEmail;
 
                 return (
@@ -178,11 +178,13 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
                           {isAdmin && <option value="administrador">Administrador</option>}
                           <option value="gerente">Gerente</option>
                           <option value="instalador">Instalador</option>
+                          <option value="afiliado">Afiliado</option>
                         </select>
                       ) : (
                         <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
                           u.role === 'administrador' ? 'bg-purple-500/10 text-purple-500' :
                           u.role === 'gerente' ? 'bg-blue-500/10 text-blue-500' :
+                          u.role === 'afiliado' ? 'bg-orange-500/10 text-orange-500' :
                           'bg-gray-500/10 text-gray-500'
                         }`}>
                           {u.role}

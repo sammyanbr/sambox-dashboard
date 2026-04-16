@@ -1,17 +1,36 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { Activity, Mail, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Activity, Mail, Lock, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [accessCode, setAccessCode] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Captcha State
+  const [captchaNum1, setCaptchaNum1] = useState(0);
+  const [captchaNum2, setCaptchaNum2] = useState(0);
+  const [captchaInput, setCaptchaInput] = useState('');
+
+  // Código de acesso necessário para novos cadastros
+  const REQUIRED_ACCESS_CODE = 'SAMBOX2024';
+
+  const generateCaptcha = useCallback(() => {
+    setCaptchaNum1(Math.floor(Math.random() * 10) + 1);
+    setCaptchaNum2(Math.floor(Math.random() * 10) + 1);
+    setCaptchaInput('');
+  }, []);
+
+  useEffect(() => {
+    generateCaptcha();
+  }, [generateCaptcha, isLogin]);
 
   const handleResetPassword = async () => {
     if (!email) {
@@ -37,14 +56,28 @@ export default function Auth() {
     setMessage('');
     setLoading(true);
 
+    if (parseInt(captchaInput) !== (captchaNum1 + captchaNum2)) {
+      setError('Verificação de segurança falhou (Soma incorreta). Tente novamente.');
+      generateCaptcha();
+      setLoading(false);
+      return;
+    }
+
     try {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
+        if (accessCode !== REQUIRED_ACCESS_CODE) {
+          setError('Código de acesso inválido. Você não tem permissão para se cadastrar.');
+          generateCaptcha();
+          setLoading(false);
+          return;
+        }
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
       console.error(err);
+      generateCaptcha(); // Refresh captcha on failure
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         // Se tentar logar e a conta não existir, avisa para criar
         setError('Conta não encontrada ou senha incorreta. Tente redefinir a senha ou criar a conta.');
@@ -64,8 +97,8 @@ export default function Auth() {
     <div className="min-h-screen bg-[#000d1a] flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.5)]">
-            <Activity className="w-7 h-7 text-white" />
+          <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden">
+            <img src="/samboxlogo.fw.png" alt="Sambox Logo" className="w-full h-full object-contain" />
           </div>
         </div>
         <h2 className="mt-6 text-center text-3xl font-black text-white tracking-tight uppercase italic">
@@ -141,6 +174,50 @@ export default function Auth() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="block w-full pl-11 pr-4 py-4 bg-[#111111] border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors sm:text-sm"
                   placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            {!isLogin && (
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">
+                  Código de Acesso
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-gray-500" />
+                  </div>
+                  <input
+                    type="text"
+                    required={!isLogin}
+                    value={accessCode}
+                    onChange={(e) => setAccessCode(e.target.value)}
+                    className="block w-full pl-11 pr-4 py-4 bg-[#111111] border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors sm:text-sm uppercase"
+                    placeholder="CÓDIGO DE CONVITE"
+                  />
+                </div>
+                <p className="mt-2 text-[10px] text-gray-500 ml-1">
+                  Necessário um código válido para criar a conta.
+                </p>
+              </div>
+            )}
+
+            <div className="bg-[#111111] border border-white/10 rounded-xl p-4 flex flex-col gap-3">
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                Verificação de Segurança
+              </label>
+              <div className="flex items-center gap-3">
+                <div className="bg-[#0a0a0a] px-4 py-3 rounded-lg border border-white/5 text-white font-bold tracking-widest shrink-0">
+                  {captchaNum1} + {captchaNum2} =
+                </div>
+                <input
+                  type="number"
+                  required
+                  value={captchaInput}
+                  onChange={(e) => setCaptchaInput(e.target.value)}
+                  className="block w-full px-4 py-3 bg-[#0a0a0a] border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors sm:text-sm text-center"
+                  placeholder="?"
                 />
               </div>
             </div>
