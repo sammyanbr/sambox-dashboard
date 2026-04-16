@@ -289,13 +289,22 @@ export default function Dashboard() {
         const keyObjects = newKeys.map((k: string) => ({
           key: k,
           note: finalNote,
-          date: now
+          date: now,
+          createdBy: user?.email || 'N/A'
         }));
-        setGeneratedKeys(prev => [...keyObjects, ...prev]);
+        
+        // Push locally to UI immediately
+        setGeneratedKeys(prev => [...keyObjects, ...prev].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
         setKeyAuthNote(''); // Clear note after success
         
-        // Refresh full list to ensure sync
-        setTimeout(fetchKeyAuthKeys, 1000);
+        // Enviar para o Firestore para persistência (Historico)
+        for (const k of keyObjects) {
+          try {
+            await addDoc(collection(db, 'keyAuthHistory'), k);
+          } catch(err) {
+            console.error("Erro salvando key no histórico interno:", err);
+          }
+        }
       } else {
         setKeyAuthError(data.message || 'Erro ao gerar key no KeyAuth.');
       }
@@ -307,35 +316,39 @@ export default function Dashboard() {
   };
 
   const fetchKeyAuthKeys = useCallback(async () => {
-    if (!keyAuthSellerKey) return;
-    
+    // Nós escutamos as Keys do Firestore diretamente para não perder dado após F5 (limitação e demora da API externa)
     setIsFetchingKeys(true);
     try {
-      const url = `https://keyauth.win/api/seller/?sellerkey=${keyAuthSellerKey}&type=fetchall&format=json`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.success && Array.isArray(data.keys)) {
-        // Map KeyAuth keys to our format
-        const mappedKeys = data.keys.map((k: any) => ({
-          key: k.key,
-          note: k.note || '',
-          date: k.gendate ? new Date(parseInt(k.gendate) * 1000).toISOString() : new Date().toISOString()
-        })).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const q = query(collection(db, 'keyAuthHistory'), orderBy('date', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const historyKeys = snapshot.docs.map(doc => ({
+           id: doc.id,
+           key: doc.data().key,
+           note: doc.data().note,
+           date: doc.data().date
+        })) as {id?: string, key: string, note: string, date: string}[];
         
-        setGeneratedKeys(mappedKeys);
-      }
+        setGeneratedKeys(historyKeys);
+        setIsFetchingKeys(false);
+      }, (error) => {
+        console.error('Error fetching keyAuthHistory:', error);
+        setIsFetchingKeys(false);
+      });
+      return unsubscribe;
     } catch (err) {
-      console.error("Erro ao buscar keys do KeyAuth:", err);
-    } finally {
+      console.error(err);
       setIsFetchingKeys(false);
     }
-  }, [keyAuthSellerKey]);
+  }, []);
 
   React.useEffect(() => {
+    let unsubscribe: any;
     if (activeMainTab === 'keys') {
-      fetchKeyAuthKeys();
+      fetchKeyAuthKeys().then(unsub => { unsubscribe = unsub; });
     }
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, [activeMainTab, fetchKeyAuthKeys]);
 
   const deleteKeyAuthKey = async (keyToDelete: string) => {
@@ -348,8 +361,18 @@ export default function Dashboard() {
       const data = await response.json();
       
       if (data.success) {
+        // Find if we have a matching ID in our generatedKeys history to delete from Firestore
+        const found = generatedKeys.find(k => (k as any).key === keyToDelete);
         setGeneratedKeys(prev => prev.filter(k => k.key !== keyToDelete));
         setKeyToDeleteAuth(null);
+        
+        if (found && (found as any).id) {
+           try {
+             await deleteDoc(doc(db, 'keyAuthHistory', (found as any).id));
+           } catch(e) {
+             console.error('Error deleting keyAuthHistory doc', e);
+           }
+        }
       } else {
         setKeyAuthError(data.message || 'Erro ao deletar key no KeyAuth.');
       }

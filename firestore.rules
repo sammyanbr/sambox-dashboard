@@ -231,6 +231,14 @@ service cloud.firestore {
       allow update: if isAuthenticated();
       allow delete: if isGerente();
     }
+
+    match /keyAuthHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+    
     function isValidAfiliadoOferta(data) {
       return data.keys().hasAll(['titulo', 'valorCupom', 'cupons', 'createdBy', 'createdAt']) &&
              data.titulo is string &&
