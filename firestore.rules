@@ -160,7 +160,12 @@ service cloud.firestore {
       // So we must allow list if the query is correctly filtered OR if user is Gerente.
       allow read: if isAuthenticated() && (
         isGerente() || 
-        resource.data.createdBy == request.auth.token.email
+        resource.data.createdBy == request.auth.token.email ||
+        resource.data.instalador == request.auth.token.email.split('@')[0] ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          resource.data.instalador == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName
+        )
       );
       
       allow create: if isAuthenticated() && isValidInstallation(request.resource.data) &&

@@ -45,6 +45,7 @@ import {
   onSnapshot, 
   query, 
   where,
+  or,
   orderBy, 
   deleteDoc, 
   doc, 
@@ -437,23 +438,35 @@ export default function Dashboard() {
     
     setIsFetchingInstallations(true);
     
-    // If not gerente/admin, filter by createdBy to comply with security rules
+    // If not gerente/admin, filter by createdBy or instalador to comply with security rules
     let q;
     if (isGerente) {
       q = query(collection(db, 'installations'), orderBy('createdAt', 'desc'));
     } else {
       q = query(
         collection(db, 'installations'), 
-        where('createdBy', '==', user.email),
-        orderBy('createdAt', 'desc')
+        or(
+          where('createdBy', '==', user.email),
+          where('instalador', '==', displayName || user.email.split('@')[0])
+        )
       );
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const instList = snapshot.docs.map(doc => ({
+      let instList = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
+      
+      // Sort manually to avoid requiring composite indexes in Firestore
+      if (!isGerente) {
+        instList = instList.sort((a: any, b: any) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+      }
+
       setInstallations(instList);
       setIsFetchingInstallations(false);
     }, (error) => {
