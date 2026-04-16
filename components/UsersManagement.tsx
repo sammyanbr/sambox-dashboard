@@ -1,8 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Shield, User, Trash2, Info } from 'lucide-react';
+import { Shield, User, Trash2, Info, Key, Plus, Copy, CheckCircle2 } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -12,6 +12,16 @@ interface UserProfile {
   createdAt: any;
 }
 
+interface InviteCode {
+  id: string;
+  code: string;
+  used: boolean;
+  createdBy: string;
+  createdAt: any;
+  usedBy?: string;
+  usedAt?: any;
+}
+
 interface UsersManagementProps {
   currentRole: string | null;
   currentUserEmail: string | undefined | null;
@@ -19,15 +29,17 @@ interface UsersManagementProps {
 
 export default function UsersManagement({ currentRole, currentUserEmail }: UsersManagementProps) {
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const isAdmin = currentRole === 'administrador' || currentUserEmail === 'sammyanbr@gmail.com' || currentUserEmail === 'zrpg01@gmail.com';
   const isGerente = currentRole === 'gerente' || isAdmin;
 
   useEffect(() => {
-    const q = query(collection(db, 'users'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const qUsers = query(collection(db, 'users'));
+    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
       const usersData: UserProfile[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -45,8 +57,58 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    let unsubscribeCodes = () => {};
+    if (isGerente) {
+      const qCodes = query(collection(db, 'inviteCodes'), orderBy('createdAt', 'desc'));
+      unsubscribeCodes = onSnapshot(qCodes, (snapshot) => {
+        const codesData: InviteCode[] = [];
+        snapshot.forEach((doc) => {
+          codesData.push({ id: doc.id, ...doc.data() } as InviteCode);
+        });
+        setInviteCodes(codesData);
+      });
+    }
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeCodes();
+    };
+  }, [isGerente]);
+
+  const handleGenerateInviteCode = async () => {
+    if (!isGerente) return;
+    try {
+      const randomString = Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const newCode = `SBOX-${randomString}`;
+      await addDoc(collection(db, 'inviteCodes'), {
+        code: newCode,
+        used: false,
+        createdBy: currentUserEmail,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao gerar código de convite.');
+    }
+  };
+
+  const handleDeleteInviteCode = async (id: string) => {
+    if (!isGerente) return;
+    if (confirm('Tem certeza que deseja excluir este código de convite?')) {
+      try {
+        await deleteDoc(doc(db, 'inviteCodes', id));
+      } catch (err) {
+        console.error(err);
+        alert('Erro ao excluir código.');
+      }
+    }
+  };
+
+  const copyToClipboard = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     if (!isAdmin && newRole === 'administrador') {
@@ -212,6 +274,94 @@ export default function UsersManagement({ currentRole, currentUserEmail }: Users
           </table>
         </div>
       </div>
+
+      {isGerente && (
+        <div className="bg-[#0a0a0a] border border-white/5 rounded-2xl overflow-hidden mt-8">
+          <div className="p-6 border-b border-white/5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-600/20 flex items-center justify-center">
+                <Key className="w-5 h-5 text-purple-500" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white tracking-widest uppercase italic">Códigos de Convite</h3>
+                <p className="text-xs text-gray-500 font-medium">Gere códigos únicos para novos cadastros no sistema.</p>
+              </div>
+            </div>
+            <button
+              onClick={handleGenerateInviteCode}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-[0_0_15px_rgba(147,51,234,0.3)] hover:scale-105"
+            >
+              <Plus className="w-4 h-4" /> Novo Código
+            </button>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-gray-300">
+              <thead className="bg-white/5 text-xs uppercase font-black tracking-wider text-gray-400">
+                <tr>
+                  <th className="px-6 py-4">Código</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Criado Em</th>
+                  <th className="px-6 py-4">Uso (Email)</th>
+                  <th className="px-6 py-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {inviteCodes.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500 italic">
+                      Nenhum código gerado ainda.
+                    </td>
+                  </tr>
+                ) : (
+                  inviteCodes.map((codeDoc) => (
+                    <tr key={codeDoc.id} className="hover:bg-white/[0.02] transition-colors group">
+                      <td className="px-6 py-4 font-mono text-purple-400 font-bold tracking-widest">
+                        {codeDoc.code}
+                      </td>
+                      <td className="px-6 py-4">
+                        {codeDoc.used ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20">
+                            Usado
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            Disponível
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-gray-400">
+                         {codeDoc.createdAt?.toDate ? codeDoc.createdAt.toDate().toLocaleDateString('pt-BR') : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 text-gray-400">
+                        {codeDoc.usedBy || '-'}
+                      </td>
+                      <td className="px-6 py-4 flex justify-end gap-2">
+                        {!codeDoc.used && (
+                           <button
+                             onClick={() => copyToClipboard(codeDoc.code)}
+                             className="p-2 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                             title="Copiar Código"
+                           >
+                             {copiedCode === codeDoc.code ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                           </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteInviteCode(codeDoc.id)}
+                          className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Excluir Código"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { collection, query, where, getDocs, updateDoc, doc, serverTimestamp, limit } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { Activity, Mail, Lock, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 
 export default function Auth() {
@@ -19,8 +20,8 @@ export default function Auth() {
   const [captchaNum2, setCaptchaNum2] = useState(0);
   const [captchaInput, setCaptchaInput] = useState('');
 
-  // Código de acesso necessário para novos cadastros
-  const REQUIRED_ACCESS_CODE = 'SAMBOX2024';
+  // Fallback master code if needed
+  const MASTER_CODE = 'SAMBOX2024';
 
   const generateCaptcha = useCallback(() => {
     setCaptchaNum1(Math.floor(Math.random() * 10) + 1);
@@ -40,11 +41,16 @@ export default function Auth() {
     try {
       setLoading(true);
       setError('');
+      setMessage('');
       await sendPasswordResetEmail(auth, email);
       setMessage('Email de redefinição de senha enviado! Verifique sua caixa de entrada.');
     } catch (err: any) {
       console.error(err);
-      setError('Erro ao enviar email de redefinição. Verifique se o email está correto.');
+      if (err.code === 'auth/quota-exceeded') {
+        setError('Limite diário de envio de emails do Firebase excedido. Tente novamente mais tarde.');
+      } else {
+        setError('Erro ao enviar email de redefinição. Verifique se o email está correto.');
+      }
     } finally {
       setLoading(false);
     }
@@ -67,26 +73,51 @@ export default function Auth() {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
-        if (accessCode !== REQUIRED_ACCESS_CODE) {
-          setError('Código de acesso inválido. Você não tem permissão para se cadastrar.');
-          generateCaptcha();
-          setLoading(false);
-          return;
+        let codeDocRef = null;
+        
+        if (accessCode !== MASTER_CODE) {
+          // Check Firestore for a valid one-time invite code
+          const codesRef = collection(db, 'inviteCodes');
+          const q = query(codesRef, where('code', '==', accessCode), where('used', '==', false), limit(1));
+          const querySnapshot = await getDocs(q);
+
+          if (querySnapshot.empty) {
+            setError('Código de convite inválido ou já utilizado.');
+            generateCaptcha();
+            setLoading(false);
+            return;
+          }
+          
+          codeDocRef = querySnapshot.docs[0].ref;
         }
+
+        // Proceed to create user
         await createUserWithEmailAndPassword(auth, email, password);
+        
+        // Mark code as used if a valid document was found
+        if (codeDocRef) {
+           await updateDoc(codeDocRef, {
+             used: true,
+             usedBy: email,
+             usedAt: serverTimestamp()
+           });
+        }
       }
     } catch (err: any) {
       console.error(err);
       generateCaptcha(); // Refresh captcha on failure
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+      const errorMessage = err.message || '';
+      const errorCode = err.code || '';
+      
+      if (errorCode === 'auth/invalid-credential' || errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password' || errorMessage.includes('auth/invalid-credential') || errorMessage.includes('auth/user-not-found') || errorMessage.includes('auth/wrong-password')) {
         // Se tentar logar e a conta não existir, avisa para criar
         setError('Conta não encontrada ou senha incorreta. Tente redefinir a senha ou criar a conta.');
-      } else if (err.code === 'auth/email-already-in-use') {
+      } else if (errorCode === 'auth/email-already-in-use' || errorMessage.includes('auth/email-already-in-use')) {
         setError('Este email já está em uso. Tente fazer login.');
-      } else if (err.code === 'auth/weak-password') {
+      } else if (errorCode === 'auth/weak-password' || errorMessage.includes('auth/weak-password')) {
         setError('A senha deve ter pelo menos 6 caracteres.');
       } else {
-        setError('Ocorreu um erro. Verifique se o provedor de Email/Senha está ativado no Firebase.');
+        setError(errorMessage ? `Erro: ${errorMessage}` : 'Ocorreu um erro. Verifique as credenciais ou sua conexão.');
       }
     } finally {
       setLoading(false);

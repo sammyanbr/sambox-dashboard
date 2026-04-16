@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { auth, db } from '../lib/firebase';
-import { signOut } from 'firebase/auth';
+import { signOut, sendPasswordResetEmail } from 'firebase/auth';
 import { 
   collection, 
   addDoc, 
@@ -111,22 +111,40 @@ export default function Dashboard() {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileMessage, setProfileMessage] = useState({ type: '', text: '' });
 
   const handleUpdateProfile = async () => {
     if (!user || !newDisplayName.trim()) return;
     setIsSavingProfile(true);
+    setProfileMessage({ type: '', text: '' });
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         displayName: newDisplayName.trim()
       });
       await refreshProfile();
       setIsEditingProfile(false);
-      alert('Perfil atualizado com sucesso!');
+      setProfileMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
     } catch (err) {
       console.error("Error updating profile:", err);
-      alert('Erro ao atualizar perfil.');
+      setProfileMessage({ type: 'error', text: 'Erro ao atualizar perfil.' });
     } finally {
       setIsSavingProfile(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!user?.email) return;
+    setProfileMessage({ type: '', text: '' });
+    try {
+      await sendPasswordResetEmail(auth, user.email);
+      setProfileMessage({ type: 'success', text: 'Email de redefinição enviado! Verifique sua caixa de entrada.' });
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === 'auth/quota-exceeded') {
+        setProfileMessage({ type: 'error', text: 'Limite de envio atingido no Firebase. Tente novamente mais tarde.' });
+      } else {
+        setProfileMessage({ type: 'error', text: 'Erro ao enviar email de redefinição de senha.' });
+      }
     }
   };
 
@@ -3345,14 +3363,33 @@ export default function Dashboard() {
                     <Shield className="w-4 h-4 text-blue-500" /> Segurança da Conta
                   </h3>
                   <p className="text-xs text-gray-500 font-medium leading-relaxed mb-6">
-                    Sua conta está protegida pela autenticação do Google. Para alterar sua senha ou informações de perfil, utilize as configurações da sua conta Google.
+                    Sua conta está protegida pela camada de segurança do Firebase. Se desejar alterar sua senha, cliqe no botão abaixo para receber um link de redefinição no seu email.
                   </p>
-                  <button 
-                    onClick={() => signOut(auth)}
-                    className="w-full py-4 rounded-xl bg-red-500/10 text-red-500 text-xs font-black uppercase tracking-widest hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
-                  >
-                    <LogOut className="w-4 h-4" /> Encerrar Sessão
-                  </button>
+                  
+                  {profileMessage.text && (
+                    <div className={`mb-6 p-4 rounded-xl text-xs font-bold text-center animate-in fade-in zoom-in-95 ${
+                      profileMessage.type === 'success' 
+                        ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' 
+                        : 'bg-red-500/10 border border-red-500/20 text-red-500'
+                    }`}>
+                      {profileMessage.text}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={handleResetPassword}
+                      className="w-full py-4 rounded-xl bg-blue-500/10 text-blue-500 text-xs font-black uppercase tracking-widest hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Key className="w-4 h-4" /> Alterar Senha
+                    </button>
+                    <button 
+                      onClick={() => signOut(auth)}
+                      className="w-full py-4 rounded-xl bg-red-500/10 text-red-500 text-xs font-black uppercase tracking-widest hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <LogOut className="w-4 h-4" /> Encerrar Sessão
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

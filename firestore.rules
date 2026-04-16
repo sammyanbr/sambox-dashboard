@@ -246,5 +246,12 @@ service cloud.firestore {
       allow update: if isGerente() && isValidAfiliadoOferta(request.resource.data);
       allow delete: if isGerente();
     }
+
+    match /inviteCodes/{codeId} {
+      allow read: if true;
+      allow create: if isGerente();
+      allow update: if isGerente() || isAuthenticated();
+      allow delete: if isGerente();
+    }
   }
 }
