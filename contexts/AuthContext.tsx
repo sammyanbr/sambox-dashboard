@@ -13,6 +13,7 @@ interface AuthContextType {
   role: UserRole | null;
   status: UserStatus | null;
   displayName: string | null;
+  photoURL: string | null;
   loading: boolean;
   refreshProfile: () => Promise<void>;
 }
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType>({
   role: null,
   status: null,
   displayName: null,
+  photoURL: null,
   loading: true,
   refreshProfile: async () => {},
 });
@@ -33,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<UserRole | null>(null);
   const [status, setStatus] = useState<UserStatus | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [photoURL, setPhotoURL] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (currentUser: User) => {
@@ -45,15 +48,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const dbRole = data.role as UserRole;
         const dbStatus = (data.status as UserStatus) || 'pending';
         const dbDisplayName = data.displayName || currentUser.email?.split('@')[0] || '';
+        const dbPhotoURL = data.photoURL || null;
         const isMaster = currentUser.email === 'sammyanbr@gmail.com' || currentUser.email === 'zrpg01@gmail.com';
         
         setDisplayName(dbDisplayName);
+        setPhotoURL(dbPhotoURL);
         if (isMaster && (dbRole !== 'administrador' || dbStatus !== 'approved')) {
           await setDoc(userDocRef, { 
             role: 'administrador', 
             status: 'approved',
             email: currentUser.email,
             displayName: dbDisplayName,
+            photoURL: dbPhotoURL,
             createdAt: data.createdAt || serverTimestamp()
           }, { merge: true });
           setRole('administrador');
@@ -73,17 +79,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: newRole,
           status: newStatus,
           displayName: initialDisplayName,
+          photoURL: null,
           createdAt: serverTimestamp()
         });
         setRole(newRole);
         setStatus(newStatus);
         setDisplayName(initialDisplayName);
+        setPhotoURL(null);
       }
     } catch (error) {
       console.error("Erro ao buscar/criar perfil do usuário:", error);
       setRole(null);
       setStatus(null);
       setDisplayName(null);
+      setPhotoURL(null);
     }
   };
 
@@ -97,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRole(null);
         setStatus(null);
         setDisplayName(null);
+        setPhotoURL(null);
       }
       
       setLoading(false);
@@ -112,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, status, displayName, loading, refreshProfile }}>
+    <AuthContext.Provider value={{ user, role, status, displayName, photoURL, loading, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

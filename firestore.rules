@@ -73,35 +73,40 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      let allowedFields = ['email', 'role', 'status', 'createdAt', 'displayName'];
+      let allowedFields = ['email', 'role', 'status', 'createdAt', 'displayName', 'photoURL'];
       return data.keys().hasOnly(allowedFields) &&
              data.email is string &&
              data.role in ['administrador', 'gerente', 'instalador', 'afiliado'] &&
              data.status in ['pending', 'approved', 'rejected'] &&
              (data.createdAt is timestamp || data.createdAt is string) &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100));
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500));
     }
 
     function isValidVideo(data) {
-      return data.keys().hasAll(['title', 'url', 'createdBy', 'createdAt']) &&
+      return data.keys().hasAll(['title', 'url', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
              data.url is string &&
              data.createdBy is string &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt is string) &&
+             (data.updatedAt is timestamp || data.updatedAt is string) &&
+             data.updatedBy is string;
     }
 
     function isValidInstallation(data) {
-      return data.keys().hasAll(['nome', 'email', 'telefone', 'instalador', 'createdBy', 'createdAt']) &&
+      return data.keys().hasAll(['nome', 'email', 'telefone', 'instalador', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.nome is string && data.nome.size() > 0 &&
              data.email is string &&
              data.telefone is string &&
              data.instalador is string &&
              data.createdBy is string &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasAll(['date', 'vendas', 'pix', 'ads_facebook', 'ads_google', 'ads_tiktok', 'extras', 'descricao_extra', 'createdBy', 'createdAt']) &&
+      return data.keys().hasAll(['date', 'vendas', 'pix', 'ads_facebook', 'ads_google', 'ads_tiktok', 'extras', 'descricao_extra', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.date is string &&
              data.vendas is number &&
              data.pix is number &&
@@ -111,22 +116,54 @@ service cloud.firestore {
              data.extras is number &&
              data.descricao_extra is string &&
              data.createdBy is string &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
     }
 
     function isValidQuickLink(data) {
-      return data.keys().hasAll(['nome', 'valor', 'link', 'cupons', 'createdBy', 'createdAt']) &&
+      return data.keys().hasAll(['nome', 'valor', 'link', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.nome is string &&
              data.valor is string &&
              data.link is string &&
+             data.createdBy is string &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
+    }
+
+    function isValidCupom(data) {
+      return data.keys().hasAll(['nome', 'cupons', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
+             data.nome is string &&
              data.cupons is list &&
              data.createdBy is string &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
+
+    function isValidNoticia(data) {
+      return data.keys().hasAll(['titulo', 'conteudo', 'author', 'authorId', 'createdAt', 'updatedAt', 'updatedBy', 'authorPhotoURL']) &&
+             data.titulo is string && data.titulo.size() > 0 &&
+             data.conteudo is string && data.conteudo.size() > 0 &&
+             data.author is string &&
+             data.authorId is string &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string &&
+             data.authorPhotoURL is string;
+    }
+
+    match /noticias/{noticiaId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidNoticia(request.resource.data);
+      allow update: if isGerente() && isValidNoticia(request.resource.data);
+      allow delete: if isGerente();
+    }
 
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -184,10 +221,12 @@ service cloud.firestore {
     }
 
     function isValidDespesaFixa(data) {
-      return data.keys().hasAll(['descricao', 'valor', 'createdAt']) &&
+      return data.keys().hasAll(['descricao', 'valor', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.descricao is string &&
              data.valor is number &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
     }
 
     match /despesasFixas/{despesaId} {
@@ -209,6 +248,13 @@ service cloud.firestore {
       allow delete: if isGerente();
     }
 
+    match /samboxCupons/{cupomId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidCupom(request.resource.data);
+      allow update: if isGerente() && isValidCupom(request.resource.data);
+      allow delete: if isGerente();
+    }
+
     match /steamLinks/{linkId} {
       allow read: if isAuthenticated();
       allow create: if isGerente() && isValidQuickLink(request.resource.data);
@@ -216,24 +262,63 @@ service cloud.firestore {
       allow delete: if isGerente();
     }
 
+    match /steamCupons/{cupomId} {
+      allow read: if isAuthenticated();
+      allow create: if isGerente() && isValidCupom(request.resource.data);
+      allow update: if isGerente() && isValidCupom(request.resource.data);
+      allow delete: if isGerente();
+    }
+
+    function isValidDenuvoAccount(data) {
+      return data.keys().hasAll(['nome', 'email', 'createdAt', 'updatedAt', 'updatedBy', 'createdBy']) &&
+             data.nome is string &&
+             data.email is string &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string &&
+             data.createdBy is string;
+    }
+
+    function isValidDenuvoPrint(data) {
+      return data.keys().hasAll(['gameName', 'imageUrl', 'createdAt', 'updatedAt', 'updatedBy', 'createdBy']) &&
+             data.gameName is string &&
+             data.imageUrl is string &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string &&
+             data.createdBy is string;
+    }
+
+    function isValidDenuvoHistory(data) {
+      return data.keys().hasAll(['accountId', 'accountName', 'gameName', 'createdByDisplayName', 'createdAt', 'updatedAt', 'updatedBy', 'createdBy']) &&
+             data.accountId is string &&
+             data.accountName is string &&
+             data.gameName is string &&
+             data.createdByDisplayName is string &&
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string &&
+             data.createdBy is string;
+    }
+
     match /denuvoAccounts/{accountId} {
       allow read: if isAuthenticated();
-      allow create: if isGerente();
-      allow update: if isGerente();
+      allow create: if isGerente() && isValidDenuvoAccount(request.resource.data);
+      allow update: if isGerente() && isValidDenuvoAccount(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /denuvoPrints/{printId} {
       allow read: if isAuthenticated();
-      allow create: if isGerente();
-      allow update: if isGerente();
+      allow create: if isGerente() && isValidDenuvoPrint(request.resource.data);
+      allow update: if isGerente() && isValidDenuvoPrint(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /denuvoHistory/{historyId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDenuvoHistory(request.resource.data);
+      allow update: if isAuthenticated() && isValidDenuvoHistory(request.resource.data);
       allow delete: if isGerente();
     }
 
@@ -245,12 +330,14 @@ service cloud.firestore {
     }
     
     function isValidAfiliadoOferta(data) {
-      return data.keys().hasAll(['titulo', 'valorCupom', 'cupons', 'createdBy', 'createdAt']) &&
+      return data.keys().hasAll(['titulo', 'valorCupom', 'cupons', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.titulo is string &&
              data.valorCupom is string &&
              data.cupons is list &&
              data.createdBy is string &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
     }
 
     match /afiliadoOfertas/{ofertaId} {

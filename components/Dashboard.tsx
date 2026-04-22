@@ -34,7 +34,9 @@ import {
   Play,
   X,
   Percent,
-  Gamepad2
+  Gamepad2,
+  Menu,
+  Home
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { auth, db } from '../lib/firebase';
@@ -55,6 +57,8 @@ import {
   setDoc
 } from 'firebase/firestore';
 import UsersManagement from './UsersManagement';
+import RichTextEditor from './RichTextEditor';
+import 'react-quill-new/dist/quill.snow.css';
 
 interface VideoTutorial {
   id: string;
@@ -67,18 +71,18 @@ interface VideoTutorial {
 }
 
 export default function Dashboard() {
-  const { user, role, displayName, refreshProfile } = useAuth();
+  const { user, role, displayName, photoURL, refreshProfile } = useAuth();
   const isAdmin = role === 'administrador' || user?.email === 'sammyanbr@gmail.com' || user?.email === 'zrpg01@gmail.com';
   const isGerente = role === 'gerente' || isAdmin;
   const isAfiliado = role === 'afiliado';
-  const [activeMainTab, setActiveMainTab] = useState<'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil'>(() => {
+  const [activeMainTab, setActiveMainTab] = useState<'home' | 'financeiro' | 'instalacoes' | 'keys' | 'others' | 'usuarios' | 'videos' | 'perfil' | 'postar_aviso'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('activeMainTab');
       if (saved) return saved as any;
     }
-    return 'perfil';
+    return 'home';
   });
-  const [activeSubTab, setActiveSubTab] = useState<'novo' | 'historico' | 'zap' | 'vendas' | 'galeria' | 'afiliados' | 'denuvo'>(() => {
+  const [activeSubTab, setActiveSubTab] = useState<'novo' | 'historico' | 'zap' | 'vendas' | 'galeria' | 'afiliados' | 'denuvo' | 'cupons_steam' | 'cupons_sambox'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('activeSubTab');
       if (saved) return saved as any;
@@ -97,34 +101,128 @@ export default function Dashboard() {
   React.useEffect(() => {
     if (isAfiliado) {
       if (['financeiro', 'instalacoes', 'usuarios', 'videos'].includes(activeMainTab)) {
-        setActiveMainTab('others');
-        setActiveSubTab('afiliados');
+        setActiveMainTab('home');
       }
-      if (activeMainTab === 'others' && ['zap', 'vendas'].includes(activeSubTab)) {
+      if (activeMainTab === 'others' && ['zap', 'vendas', 'denuvo', 'cupons_steam', 'cupons_sambox'].includes(activeSubTab)) {
         setActiveSubTab('afiliados');
       }
     }
   }, [isAfiliado, activeMainTab, activeSubTab]);
 
   const [isOthersDropdownOpen, setIsOthersDropdownOpen] = useState(false);
+  const [isSteamDropdownOpen, setIsSteamDropdownOpen] = useState(false);
+  const [isSamboxDropdownOpen, setIsSamboxDropdownOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Perfil State
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState('');
+  const [newPhotoURL, setNewPhotoURL] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState({ type: '', text: '' });
 
+  // Home / Mural State
+  const [noticias, setNoticias] = useState<any[]>([]);
+  const [novaNoticia, setNovaNoticia] = useState({ titulo: '', conteudo: '' });
+  const [editingNoticiaId, setEditingNoticiaId] = useState<string | null>(null);
+  const [noticiaToDelete, setNoticiaToDelete] = useState<string | null>(null);
+  const [isSubmittingNoticia, setIsSubmittingNoticia] = useState(false);
+  const [noticiasCurrentPage, setNoticiasCurrentPage] = useState(1);
+  const noticiasPerPage = 3;
+
+  React.useEffect(() => {
+    const q = query(collection(db, 'noticias'), orderBy('updatedAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setNoticias(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, error => {
+      console.error('Error fetching noticias:', error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleCreateNoticia = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!novaNoticia.titulo || !novaNoticia.conteudo || !user) return;
+    setIsSubmittingNoticia(true);
+    try {
+      if (editingNoticiaId) {
+        await updateDoc(doc(db, 'noticias', editingNoticiaId), {
+          titulo: novaNoticia.titulo,
+          conteudo: novaNoticia.conteudo,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.uid,
+          authorPhotoURL: photoURL || ''
+        });
+        setEditingNoticiaId(null);
+      } else {
+        await addDoc(collection(db, 'noticias'), {
+          titulo: novaNoticia.titulo,
+          conteudo: novaNoticia.conteudo,
+          author: displayName || user.email,
+          authorId: user.uid,
+          authorPhotoURL: photoURL || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      setNovaNoticia({ titulo: '', conteudo: '' });
+      setActiveMainTab('home');
+      window.scrollTo(0, 0);
+      setProfileMessage({ text: "Notícia salva com sucesso!", type: 'success' });
+      setTimeout(() => setProfileMessage({ text: '', type: 'success' }), 3000);
+    } catch (err) {
+      console.error("Erro ao salvar noticia:", err);
+      alert("Erro ao salvar notícia.");
+    } finally {
+      setIsSubmittingNoticia(false);
+    }
+  };
+
+  const startEditingNoticia = (noticia: any) => {
+    setEditingNoticiaId(noticia.id);
+    setNovaNoticia({ titulo: noticia.titulo, conteudo: noticia.conteudo });
+    setActiveMainTab('postar_aviso');
+    window.scrollTo(0, 0);
+  };
+
+  const cancelEditingNoticia = () => {
+    setEditingNoticiaId(null);
+    setNovaNoticia({ titulo: '', conteudo: '' });
+    setActiveMainTab('home');
+  };
+
+  const handleDeleteNoticia = (id: string) => {
+    setNoticiaToDelete(id);
+  };
+
+  const confirmDeleteNoticia = async () => {
+    if (!noticiaToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'noticias', noticiaToDelete));
+      setNoticiaToDelete(null);
+    } catch (err) {
+      console.error("Erro ao deletar noticia:", err);
+      alert("Erro ao excluir notícia.");
+    }
+  };
+
   const handleUpdateProfile = async () => {
-    if (!user || !newDisplayName.trim()) return;
+    if (!user) return;
     setIsSavingProfile(true);
     setProfileMessage({ type: '', text: '' });
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        displayName: newDisplayName.trim()
-      });
-      await refreshProfile();
-      setIsEditingProfile(false);
-      setProfileMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
+      const updates: any = {};
+      if (newDisplayName.trim()) updates.displayName = newDisplayName.trim();
+      if (newPhotoURL.trim()) updates.photoURL = newPhotoURL.trim();
+      
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, 'users', user.uid), updates);
+        await refreshProfile();
+        setIsEditingProfile(false);
+        setProfileMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
+      } else {
+        setProfileMessage({ type: 'error', text: 'Nenhuma alteração para salvar.' });
+      }
     } catch (err) {
       console.error("Error updating profile:", err);
       setProfileMessage({ type: 'error', text: 'Erro ao atualizar perfil.' });
@@ -179,7 +277,7 @@ export default function Dashboard() {
     
     // Fetch Despesas Fixas only for gerentes
     if (isGerente) {
-      const qDespesas = query(collection(db, 'despesasFixas'), orderBy('createdAt', 'desc'));
+      const qDespesas = query(collection(db, 'despesasFixas'), orderBy('updatedAt', 'desc'));
       unsubscribeDespesas = onSnapshot(qDespesas, (snapshot) => {
         const despesas = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -216,7 +314,9 @@ export default function Dashboard() {
         await addDoc(collection(db, 'despesasFixas'), {
           descricao: novaDespesa.descricao,
           valor: Number(novaDespesa.valor),
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: user?.uid || 'unknown'
         });
         setNovaDespesa({ valor: '', descricao: '' });
       } catch (error) {
@@ -264,6 +364,127 @@ export default function Dashboard() {
   const [videoSearchQuery, setVideoSearchQuery] = useState('');
   const [keyCurrentPage, setKeyCurrentPage] = useState(1);
   const keysPerPage = 15;
+
+  const [editingLink, setEditingLink] = useState<{id: string, type: 'sambox' | 'steam' | 'afiliado', data: any} | null>(null);
+
+  const parseCouponDetail = (cupom: string) => {
+    if (cupom.includes(':')) {
+      const parts = cupom.split(':');
+      return { code: parts[0].trim(), value: parts[1].trim() };
+    }
+    return { code: cupom.trim(), value: '' };
+  };
+
+  const startEditingLink = (item: any, type: 'sambox' | 'steam' | 'afiliado') => {
+    setEditingLink({ id: item.id, type, data: item });
+    
+    if (type === 'sambox') {
+      setSamboxLinkFormData({
+        nome: item.nome,
+        valor: item.valor,
+        link: item.link
+      });
+    } else if (type === 'steam') {
+      setSteamLinkFormData({
+        nome: item.nome,
+        valor: item.valor,
+        link: item.link
+      });
+    } else if (type === 'afiliado') {
+      // Map existing cupons to new structured format if they are strings
+      const structuredCupons = (item.cupons || []).map((c: any) => {
+        if (typeof c === 'string') {
+          const details = parseCouponDetail(c);
+          return { codigo: details.code, valor: details.value };
+        }
+        return c;
+      });
+
+      if (structuredCupons.length === 0) structuredCupons.push({ codigo: '', valor: '' });
+
+      setAfiliadoFormData({
+        titulo: item.titulo,
+        valorCupom: item.valorCupom,
+        cupons: structuredCupons
+      });
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingLink(null);
+    setSamboxLinkFormData({ nome: '', valor: '', link: '' });
+    setSteamLinkFormData({ nome: '', valor: '', link: '' });
+    setAfiliadoFormData({ titulo: '', valorCupom: '', cupons: [{ codigo: '', valor: '' }] });
+  };
+  
+  const startEditingCupom = (item: CupomItem, type: 'sambox' | 'steam') => {
+    setEditingCupom({ id: item.id, type, data: item });
+    
+    // Map existing cupons to new structured format if they are strings (legacy support)
+    const structuredCupons = (item.cupons || []).map((c: any) => {
+      if (typeof c === 'string') {
+        const details = parseCouponDetail(c);
+        return { codigo: details.code, valor: details.value };
+      }
+      return c;
+    });
+
+    if (structuredCupons.length === 0) structuredCupons.push({ codigo: '', valor: '' });
+
+    if (type === 'sambox') {
+      setSamboxCupomFormData({
+        nome: item.nome,
+        cupons: structuredCupons
+      });
+    } else {
+      setSteamCupomFormData({
+        nome: item.nome,
+        cupons: structuredCupons
+      });
+    }
+  };
+
+  const cancelEditingCupom = () => {
+    setEditingCupom(null);
+    setSamboxCupomFormData({ nome: '', cupons: [{ codigo: '', valor: '' }] });
+    setSteamCupomFormData({ nome: '', cupons: [{ codigo: '', valor: '' }] });
+  };
+
+  const addCouponToForm = (type: 'afiliado' | 'samboxCupom' | 'steamCupom') => {
+    if (type === 'afiliado') {
+      setAfiliadoFormData(prev => ({ ...prev, cupons: [...prev.cupons, { codigo: '', valor: '' }] }));
+    } else if (type === 'samboxCupom') {
+      setSamboxCupomFormData(prev => ({ ...prev, cupons: [...prev.cupons, { codigo: '', valor: '' }] }));
+    } else if (type === 'steamCupom') {
+      setSteamCupomFormData(prev => ({ ...prev, cupons: [...prev.cupons, { codigo: '', valor: '' }] }));
+    }
+  };
+
+  const removeCouponFromForm = (type: 'afiliado' | 'samboxCupom' | 'steamCupom', index: number) => {
+    if (type === 'afiliado') {
+      setAfiliadoFormData(prev => ({ ...prev, cupons: prev.cupons.filter((_, i) => i !== index) }));
+    } else if (type === 'samboxCupom') {
+      setSamboxCupomFormData(prev => ({ ...prev, cupons: prev.cupons.filter((_, i) => i !== index) }));
+    } else if (type === 'steamCupom') {
+      setSteamCupomFormData(prev => ({ ...prev, cupons: prev.cupons.filter((_, i) => i !== index) }));
+    }
+  };
+
+  const handleCouponChange = (type: 'afiliado' | 'samboxCupom' | 'steamCupom', index: number, field: 'codigo' | 'valor', value: string) => {
+    if (type === 'afiliado') {
+      const newCupons = [...afiliadoFormData.cupons];
+      newCupons[index] = { ...newCupons[index], [field]: value };
+      setAfiliadoFormData(prev => ({ ...prev, cupons: newCupons }));
+    } else if (type === 'samboxCupom') {
+      const newCupons = [...samboxCupomFormData.cupons];
+      newCupons[index] = { ...newCupons[index], [field]: value };
+      setSamboxCupomFormData(prev => ({ ...prev, cupons: newCupons }));
+    } else if (type === 'steamCupom') {
+      const newCupons = [...steamCupomFormData.cupons];
+      newCupons[index] = { ...newCupons[index], [field]: value };
+      setSteamCupomFormData(prev => ({ ...prev, cupons: newCupons }));
+    }
+  };
 
   const generateKeyAuthKey = async () => {
     if (!keyAuthSellerKey) {
@@ -418,7 +639,7 @@ export default function Dashboard() {
 
   // Fetch Videos
   React.useEffect(() => {
-    const q = query(collection(db, 'videos'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'videos'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const videoList = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -475,7 +696,7 @@ export default function Dashboard() {
     });
 
     return () => unsubscribe();
-  }, [user?.email, isGerente]);
+  }, [user?.email, isGerente, displayName]);
 
   // Fetch Transactions
   React.useEffect(() => {
@@ -509,13 +730,13 @@ export default function Dashboard() {
       if (!thumbUrl) {
         if (videoFormData.url.includes('youtube.com/watch?v=')) {
           const videoId = videoFormData.url.split('v=')[1]?.split('&')[0];
-          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
         } else if (videoFormData.url.includes('youtu.be/')) {
           const videoId = videoFormData.url.split('youtu.be/')[1]?.split('?')[0];
-          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
         } else if (videoFormData.url.includes('youtube.com/shorts/')) {
           const videoId = videoFormData.url.split('shorts/')[1]?.split('?')[0];
-          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+          if (videoId) thumbUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
         }
       }
 
@@ -523,7 +744,9 @@ export default function Dashboard() {
         ...videoFormData,
         thumbnailUrl: thumbUrl || 'https://picsum.photos/seed/video/800/450',
         createdBy: user?.email || 'Sistema',
-        createdAt: serverTimestamp()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.uid || 'unknown'
       });
 
       setVideoFormData({
@@ -582,19 +805,32 @@ export default function Dashboard() {
   const [zapMessage, setZapMessage] = useState('');
   const [generatedZapLink, setGeneratedZapLink] = useState('');
 
+  interface CouponDetail {
+    codigo: string;
+    valor: string;
+  }
+
+  interface CupomItem {
+    id: string;
+    nome: string;
+    cupons: { codigo: string; valor: string }[];
+    createdAt?: string;
+    createdBy?: string;
+  }
+
   // Sambox Links State
   interface QuickLink {
     id: string;
     nome: string;
     valor: string;
     link: string;
-    cupons: string[];
+    cupons: (string | CouponDetail)[];
   }
   interface AfiliadoOferta {
     id: string;
     titulo: string;
     valorCupom: string;
-    cupons: string[];
+    cupons: (string | CouponDetail)[];
   }
   interface DenuvoAccount {
     id: string;
@@ -623,15 +859,20 @@ export default function Dashboard() {
   const [afiliadoFormData, setAfiliadoFormData] = useState({
     titulo: '',
     valorCupom: '',
-    cupons: ''
+    cupons: [{ codigo: '', valor: '' }]
   });
 
   const [samboxLinks, setSamboxLinks] = useState<QuickLink[]>([]);
   const [samboxLinkFormData, setSamboxLinkFormData] = useState({
     nome: '',
     valor: '',
-    link: '',
-    cupons: ''
+    link: ''
+  });
+
+  const [samboxCuponsList, setSamboxCuponsList] = useState<CupomItem[]>([]);
+  const [samboxCupomFormData, setSamboxCupomFormData] = useState({
+    nome: '',
+    cupons: [{ codigo: '', valor: '' }]
   });
 
   // Steam Links State
@@ -639,9 +880,17 @@ export default function Dashboard() {
   const [steamLinkFormData, setSteamLinkFormData] = useState({
     nome: '',
     valor: '',
-    link: '',
-    cupons: ''
+    link: ''
   });
+
+  const [steamCuponsList, setSteamCuponsList] = useState<CupomItem[]>([]);
+  const [steamCupomFormData, setSteamCupomFormData] = useState({
+    nome: '',
+    cupons: [{ codigo: '', valor: '' }]
+  });
+
+  const [editingCupom, setEditingCupom] = useState<{ id: string, type: 'sambox' | 'steam', data: any } | null>(null);
+  const [cupomToDelete, setCupomToDelete] = useState<{ id: string, type: 'sambox' | 'steam' } | null>(null);
 
   // Denuvo Links State -> Updated to new structures
   const [denuvoAccounts, setDenuvoAccounts] = useState<DenuvoAccount[]>([]);
@@ -657,7 +906,7 @@ export default function Dashboard() {
 
   // Fetch Links
   React.useEffect(() => {
-    const qSambox = query(collection(db, 'samboxLinks'), orderBy('createdAt', 'desc'));
+    const qSambox = query(collection(db, 'samboxLinks'), orderBy('updatedAt', 'desc'));
     const unsubscribeSambox = onSnapshot(qSambox, (snapshot) => {
       const links = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -669,7 +918,18 @@ export default function Dashboard() {
       alert('Error fetching samboxLinks: ' + error.message);
     });
 
-    const qSteam = query(collection(db, 'steamLinks'), orderBy('createdAt', 'desc'));
+    const qSamboxCupons = query(collection(db, 'samboxCupons'), orderBy('updatedAt', 'desc'));
+    const unsubscribeSamboxCupons = onSnapshot(qSamboxCupons, (snapshot) => {
+      const cupons = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as CupomItem[];
+      setSamboxCuponsList(cupons);
+    }, (error) => {
+      console.error('Error fetching samboxCupons:', error);
+    });
+
+    const qSteam = query(collection(db, 'steamLinks'), orderBy('updatedAt', 'desc'));
     const unsubscribeSteam = onSnapshot(qSteam, (snapshot) => {
       const links = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -681,7 +941,18 @@ export default function Dashboard() {
       alert('Error fetching steamLinks: ' + error.message);
     });
 
-    const qDenuvoAcc = query(collection(db, 'denuvoAccounts'), orderBy('createdAt', 'desc'));
+    const qSteamCupons = query(collection(db, 'steamCupons'), orderBy('updatedAt', 'desc'));
+    const unsubscribeSteamCupons = onSnapshot(qSteamCupons, (snapshot) => {
+      const cupons = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as CupomItem[];
+      setSteamCuponsList(cupons);
+    }, (error) => {
+      console.error('Error fetching steamCupons:', error);
+    });
+
+    const qDenuvoAcc = query(collection(db, 'denuvoAccounts'), orderBy('updatedAt', 'desc'));
     const unsubscribeDenuvoAcc = onSnapshot(qDenuvoAcc, (snapshot) => {
       const accounts = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -703,7 +974,7 @@ export default function Dashboard() {
       console.error('Error fetching denuvoPrints:', error);
     });
 
-    const qDenuvoHis = query(collection(db, 'denuvoHistory'), orderBy('createdAt', 'desc'));
+    const qDenuvoHis = query(collection(db, 'denuvoHistory'), orderBy('updatedAt', 'desc'));
     const unsubscribeDenuvoHis = onSnapshot(qDenuvoHis, (snapshot) => {
       const history = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -714,7 +985,7 @@ export default function Dashboard() {
       console.error('Error fetching denuvoHistory:', error);
     });
 
-    const qAfiliado = query(collection(db, 'afiliadoOfertas'), orderBy('createdAt', 'desc'));
+    const qAfiliado = query(collection(db, 'afiliadoOfertas'), orderBy('updatedAt', 'desc'));
     const unsubscribeAfiliado = onSnapshot(qAfiliado, (snapshot) => {
       const ofertas = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -728,7 +999,9 @@ export default function Dashboard() {
 
     return () => {
       unsubscribeSambox();
+      unsubscribeSamboxCupons();
       unsubscribeSteam();
+      unsubscribeSteamCupons();
       unsubscribeDenuvoAcc();
       unsubscribeDenuvoPr();
       unsubscribeDenuvoHis();
@@ -750,49 +1023,56 @@ export default function Dashboard() {
     e.preventDefault();
     
     const cuponsArray = afiliadoFormData.cupons
-      .split(',')
-      .map(c => c.trim())
-      .filter(c => c.length > 0);
+      .filter(c => c.codigo.trim().length > 0);
 
-    const newOferta = {
+    const data = {
       titulo: afiliadoFormData.titulo,
       valorCupom: afiliadoFormData.valorCupom,
       cupons: cuponsArray,
-      createdAt: new Date().toISOString(),
-      createdBy: user?.email || 'unknown'
+      createdAt: (editingLink?.type === 'afiliado' && editingLink.data.createdAt) ? editingLink.data.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: (editingLink?.type === 'afiliado' && editingLink.data.createdBy) ? editingLink.data.createdBy : (user?.email || 'unknown'),
+      updatedBy: user?.uid || 'unknown'
     };
     
     try {
-      await addDoc(collection(db, 'afiliadoOfertas'), newOferta);
-      setAfiliadoFormData({ titulo: '', valorCupom: '', cupons: '' });
+      if (editingLink?.type === 'afiliado') {
+        await updateDoc(doc(db, 'afiliadoOfertas', editingLink.id), data);
+        setEditingLink(null);
+      } else {
+        await addDoc(collection(db, 'afiliadoOfertas'), data);
+      }
+      setAfiliadoFormData({ titulo: '', valorCupom: '', cupons: [{ codigo: '', valor: '' }] });
     } catch (error) {
-      console.error('Error adding afiliado oferta:', error);
-      alert('Erro ao adicionar oferta de afiliado.');
+      console.error('Error handling afiliado oferta:', error);
+      alert('Erro ao processar oferta de afiliado.');
     }
   };
 
   const handleSamboxLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cuponsArray = samboxLinkFormData.cupons
-      .split(',')
-      .map(c => c.trim())
-      .filter(c => c.length > 0);
 
-    const newLink = {
+    const data = {
       nome: samboxLinkFormData.nome,
       valor: samboxLinkFormData.valor,
       link: samboxLinkFormData.link,
-      cupons: cuponsArray,
-      createdAt: new Date().toISOString(),
-      createdBy: user?.email || 'unknown'
+      createdAt: (editingLink?.type === 'sambox' && editingLink.data.createdAt) ? editingLink.data.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: (editingLink?.type === 'sambox' && editingLink.data.createdBy) ? editingLink.data.createdBy : (user?.email || 'unknown'),
+      updatedBy: user?.uid || 'unknown'
     };
     
     try {
-      await addDoc(collection(db, 'samboxLinks'), newLink);
-      setSamboxLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
+      if (editingLink?.type === 'sambox') {
+        await updateDoc(doc(db, 'samboxLinks', editingLink.id), data);
+        setEditingLink(null);
+      } else {
+        await addDoc(collection(db, 'samboxLinks'), data);
+      }
+      setSamboxLinkFormData({ nome: '', valor: '', link: '' });
     } catch (error) {
-      console.error('Error adding sambox link:', error);
-      alert('Erro ao adicionar link.');
+      console.error('Error handling sambox link:', error);
+      alert('Erro ao processar link.');
     }
   };
 
@@ -803,28 +1083,84 @@ export default function Dashboard() {
 
   const handleSteamLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Split comma-separated coupons into an array
-    const cuponsArray = steamLinkFormData.cupons
-      .split(',')
-      .map(c => c.trim())
-      .filter(c => c.length > 0);
 
-    const newLink = {
+    const data = {
       nome: steamLinkFormData.nome,
       valor: steamLinkFormData.valor,
       link: steamLinkFormData.link,
-      cupons: cuponsArray,
-      createdAt: new Date().toISOString(),
-      createdBy: user?.email || 'unknown'
+      createdAt: (editingLink?.type === 'steam' && editingLink.data.createdAt) ? editingLink.data.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: (editingLink?.type === 'steam' && editingLink.data.createdBy) ? editingLink.data.createdBy : (user?.email || 'unknown'),
+      updatedBy: user?.uid || 'unknown'
     };
     
     try {
-      await addDoc(collection(db, 'steamLinks'), newLink);
-      setSteamLinkFormData({ nome: '', valor: '', link: '', cupons: '' });
+      if (editingLink?.type === 'steam') {
+        await updateDoc(doc(db, 'steamLinks', editingLink.id), data);
+        setEditingLink(null);
+      } else {
+        await addDoc(collection(db, 'steamLinks'), data);
+      }
+      setSteamLinkFormData({ nome: '', valor: '', link: '' });
     } catch (error) {
-      console.error('Error adding steam link:', error);
-      alert('Erro ao adicionar link.');
+      console.error('Error handling steam link:', error);
+      alert('Erro ao processar link.');
+    }
+  };
+
+  const handleSamboxCupomSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const cuponsArray = samboxCupomFormData.cupons.filter(c => c.codigo.trim().length > 0);
+
+    const data = {
+      nome: samboxCupomFormData.nome,
+      cupons: cuponsArray,
+      createdAt: (editingCupom?.type === 'sambox' && editingCupom.data.createdAt) ? editingCupom.data.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: (editingCupom?.type === 'sambox' && editingCupom.data.createdBy) ? editingCupom.data.createdBy : (user?.email || 'unknown'),
+      updatedBy: user?.uid || 'unknown'
+    };
+    
+    try {
+      if (editingCupom?.type === 'sambox') {
+        await updateDoc(doc(db, 'samboxCupons', editingCupom.id), data);
+        setEditingCupom(null);
+      } else {
+        await addDoc(collection(db, 'samboxCupons'), data);
+      }
+      setSamboxCupomFormData({ nome: '', cupons: [{ codigo: '', valor: '' }] });
+    } catch (error) {
+      console.error('Error handling sambox cupom:', error);
+      alert('Erro ao processar cupom.');
+    }
+  };
+
+  const handleSteamCupomSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const cuponsArray = steamCupomFormData.cupons.filter(c => c.codigo.trim().length > 0);
+
+    const data = {
+      nome: steamCupomFormData.nome,
+      cupons: cuponsArray,
+      createdAt: (editingCupom?.type === 'steam' && editingCupom.data.createdAt) ? editingCupom.data.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdBy: (editingCupom?.type === 'steam' && editingCupom.data.createdBy) ? editingCupom.data.createdBy : (user?.email || 'unknown'),
+      updatedBy: user?.uid || 'unknown'
+    };
+    
+    try {
+      if (editingCupom?.type === 'steam') {
+        await updateDoc(doc(db, 'steamCupons', editingCupom.id), data);
+        setEditingCupom(null);
+      } else {
+        await addDoc(collection(db, 'steamCupons'), data);
+      }
+      setSteamCupomFormData({ nome: '', cupons: [{ codigo: '', valor: '' }] });
+    } catch (error) {
+      console.error('Error handling steam cupom:', error);
+      alert('Erro ao processar cupom.');
     }
   };
 
@@ -837,6 +1173,8 @@ export default function Dashboard() {
         nome: denuvoAccountFormData.nome,
         email: denuvoAccountFormData.email,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.uid || 'unknown',
         createdBy: user?.email || 'unknown'
       });
       setDenuvoAccountFormData({ nome: '', email: '' });
@@ -856,6 +1194,8 @@ export default function Dashboard() {
         gameName: denuvoPrintFormData.gameName,
         imageUrl: denuvoPrintFormData.imageUrl,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.uid || 'unknown',
         createdBy: user?.email || 'unknown'
       });
       setDenuvoPrintFormData({ gameName: '', imageUrl: '' });
@@ -881,6 +1221,8 @@ export default function Dashboard() {
         gameName: denuvoHistoryFormData.gameName,
         createdByDisplayName: displayName || user?.email?.split('@')[0] || 'Unknown',
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.uid || 'unknown',
         createdBy: user?.email || 'unknown'
       });
       setDenuvoHistoryFormData({ gameName: '', accountId: '' });
@@ -971,6 +1313,22 @@ export default function Dashboard() {
     }
   };
 
+  const confirmDeleteCupom = async () => {
+    if (!cupomToDelete) return;
+    
+    try {
+      let collectionName = '';
+      if (cupomToDelete.type === 'sambox') collectionName = 'samboxCupons';
+      else if (cupomToDelete.type === 'steam') collectionName = 'steamCupons';
+
+      await deleteDoc(doc(db, collectionName, cupomToDelete.id));
+      setCupomToDelete(null);
+    } catch (error) {
+      console.error('Error deleting cupom:', error);
+      alert('Erro ao deletar cupom.');
+    }
+  };
+
   const confirmDeleteLink = async () => {
     if (!linkToDelete) return;
     
@@ -1024,7 +1382,9 @@ export default function Dashboard() {
       extras: Number(formData.extras) || 0,
       descricao_extra: formData.descricao_extra,
       createdBy: user?.email || 'unknown',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: user?.uid || 'unknown'
     };
     
     try {
@@ -1057,6 +1417,8 @@ export default function Dashboard() {
 
     const newInstallation = {
       createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      updatedBy: user?.uid || 'unknown',
       nome: instFormData.nome,
       email: instFormData.email,
       telefone: instFormData.telefone,
@@ -1164,143 +1526,335 @@ export default function Dashboard() {
           <div className="flex flex-col md:flex-row md:items-center justify-between py-2 md:h-20 gap-3 md:gap-4">
             <div className="flex items-center justify-between w-full md:w-auto">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
-                  <Image src="/samboxlogo.fw.png" alt="Sambox Logo" width={32} height={32} className="w-full h-full object-contain" />
+                <div className="w-12 h-12 md:w-16 md:h-16 flex items-center justify-center shrink-0 overflow-hidden">
+                  <Image src="/samboxlogo.fw.png" alt="Sambox Logo" width={80} height={80} className="w-full h-full object-contain" priority />
                 </div>
-                <span className="text-base md:text-2xl font-black tracking-tighter text-white uppercase italic truncate">
-                  Sambox <span className="text-blue-500 drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]">Dashboard</span>
-                </span>
               </div>
               
-              {/* Mobile User Info - Simplified */}
-              <div className="flex md:hidden items-center gap-2">
-                <div className="text-right hidden sm:block">
-                  <p className="text-[8px] text-blue-300/60 uppercase font-bold tracking-widest">{role || 'Usuário'}</p>
-                  <p className="text-[10px] font-black text-white leading-none uppercase truncate max-w-[100px]">{displayName || user?.email?.split('@')[0] || 'Sammy'}</p>
-                </div>
+              {/* Hamburger Button for Mobile */}
+              <div className="flex items-center gap-3 md:hidden">
                 <button 
-                  onClick={() => { setActiveMainTab('perfil'); window.scrollTo(0, 0); }}
-                  className="w-8 h-8 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center hover:bg-blue-500/20 transition-colors"
-                  title="Minha Conta"
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2 -mr-2 text-white hover:bg-white/10 rounded-lg transition-colors"
                 >
-                  <User className="w-3.5 h-3.5 text-blue-500" />
-                </button>
-                <button 
-                  onClick={() => signOut(auth)}
-                  className="w-8 h-8 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center hover:bg-red-500/20 transition-colors"
-                  title="Sair"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-red-500" />
+                  {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
                 </button>
               </div>
             </div>
 
-            {/* Navigation Items - Better spacing and scroll */}
-            <nav className="flex flex-wrap items-center gap-1 md:gap-2 py-1 md:py-0">
+            {/* Desktop Navigation Items */}
+            <nav className="hidden md:flex items-center gap-1 bg-[#0a0a0a] border border-white/10 p-1.5 rounded-2xl shadow-xl">
+              <button 
+                onClick={() => { setActiveMainTab('home'); setIsOthersDropdownOpen(false); setIsSteamDropdownOpen(false); setIsSamboxDropdownOpen(false); }}
+                className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'home' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+              >
+                <Home className="w-4 h-4" /> Home
+              </button>
+              
               {!isAfiliado && (
                 <button 
-                  onClick={() => { setActiveMainTab('instalacoes'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); }}
-                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'instalacoes' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
+                  onClick={() => { setActiveMainTab('instalacoes'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); setIsSteamDropdownOpen(false); setIsSamboxDropdownOpen(false); }}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'instalacoes' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                 >
-                  Instalações
+                  <Download className="w-4 h-4" /> Instalações
                 </button>
               )}
-              <button 
-                onClick={() => { setActiveMainTab('keys'); setActiveSubTab('novo'); setIsOthersDropdownOpen(false); }}
-                className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'keys' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
-              >
-                Keys Steam
-              </button>
+              
               {!isAfiliado && (
-                <button 
-                  onClick={() => { setActiveMainTab('videos'); setActiveSubTab('galeria'); setIsOthersDropdownOpen(false); }}
-                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all ${activeMainTab === 'videos' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
-                >
-                  Vídeos
-                </button>
+                <div className="relative">
+                  <button 
+                    onClick={() => { setIsSamboxDropdownOpen(!isSamboxDropdownOpen); setIsSteamDropdownOpen(false); setIsOthersDropdownOpen(false); }}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'others' && (activeSubTab === 'zap' || activeSubTab === 'cupons_sambox') ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                  >
+                    <MessageCircle className="w-4 h-4" /> Sambox <Plus className={`w-3 h-3 transition-transform ${isSamboxDropdownOpen ? 'rotate-45' : ''}`} />
+                  </button>
+
+                  {isSamboxDropdownOpen && (
+                    <div className="absolute top-full right-0 mt-2 w-56 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('zap'); setIsSamboxDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3"
+                      >
+                        <DollarSign className="w-4 h-4" /> Ofertas
+                      </button>
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('cupons_sambox'); setIsSamboxDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
+                      >
+                        <Percent className="w-4 h-4" /> Cupons
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               
               <div className="relative">
                 <button 
-                  onClick={() => setIsOthersDropdownOpen(!isOthersDropdownOpen)}
-                  className={`px-4 md:px-5 py-2 md:py-2.5 rounded-xl text-[10px] md:text-sm font-black uppercase tracking-[0.15em] md:tracking-[0.2em] whitespace-nowrap transition-all flex items-center gap-1 ${activeMainTab === 'others' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-300/40 hover:text-white'}`}
+                  onClick={() => { setIsSteamDropdownOpen(!isSteamDropdownOpen); setIsOthersDropdownOpen(false); setIsSamboxDropdownOpen(false); }}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'keys' || (activeMainTab === 'others' && (activeSubTab === 'denuvo' || activeSubTab === 'vendas' || activeSubTab === 'cupons_steam')) ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
                 >
-                  Outros <Plus className={`w-3 h-3 transition-transform ${isOthersDropdownOpen ? 'rotate-45' : ''}`} />
+                  <Key className="w-4 h-4" /> Steam <Plus className={`w-3 h-3 transition-transform ${isSteamDropdownOpen ? 'rotate-45' : ''}`} />
                 </button>
 
-                {isOthersDropdownOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-48 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
-                    {!isAfiliado && (
-                      <>
-                        <button 
-                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('zap'); setIsOthersDropdownOpen(false); }}
-                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2"
-                        >
-                          <MessageCircle className="w-3 h-3" /> Sambox
-                        </button>
-                        <button 
-                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('vendas'); setIsOthersDropdownOpen(false); }}
-                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 border-t border-white/5"
-                        >
-                          <DollarSign className="w-3 h-3" /> Sambox Steam
-                        </button>
-                        <button 
-                          onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsOthersDropdownOpen(false); }}
-                          className="w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 border-t border-white/5"
-                        >
-                          <Gamepad2 className="w-3 h-3" /> Denuvo
-                        </button>
-                      </>
-                    )}
+                {isSteamDropdownOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-56 bg-[#0a0a0a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100] animate-in fade-in slide-in-from-top-2 duration-200">
                     <button 
-                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('afiliados'); setIsOthersDropdownOpen(false); }}
-                      className={`w-full px-4 py-3 text-left text-[10px] font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-2 ${!isAfiliado ? 'border-t border-white/5' : ''}`}
+                      onClick={() => { setActiveMainTab('keys'); setActiveSubTab('novo'); setIsSteamDropdownOpen(false); }}
+                      className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3"
                     >
-                      <Percent className="w-3 h-3" /> Links Afiliados
+                      <Key className="w-4 h-4" /> Keys Steam
                     </button>
+                    {!isAfiliado && (
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('vendas'); setIsSteamDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
+                      >
+                        <DollarSign className="w-4 h-4" /> Ofertas
+                      </button>
+                    )}
+                    {!isAfiliado && (
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('cupons_steam'); setIsSteamDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
+                      >
+                        <Percent className="w-4 h-4" /> Cupons
+                      </button>
+                    )}
+                    {!isAfiliado && (
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsSteamDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
+                      >
+                        <Gamepad2 className="w-4 h-4" /> Denuvo
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
+              
+              {!isAfiliado && (
+                <button 
+                  onClick={() => { setActiveMainTab('videos'); setActiveSubTab('galeria'); setIsOthersDropdownOpen(false); setIsSteamDropdownOpen(false); setIsSamboxDropdownOpen(false); }}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'videos' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                >
+                  <Video className="w-4 h-4" /> Vídeos
+                </button>
+              )}
+              
+              <button 
+                onClick={() => { setActiveMainTab('others'); setActiveSubTab('afiliados'); setIsOthersDropdownOpen(false); setIsSteamDropdownOpen(false); setIsSamboxDropdownOpen(false); }}
+                className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all flex items-center gap-2 ${activeMainTab === 'others' && activeSubTab === 'afiliados' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+              >
+                <Percent className="w-4 h-4" /> Afiliados
+              </button>
             </nav>
 
             {/* Desktop User Info */}
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-4">
               <div className="text-right">
-                <p className="text-[10px] text-blue-300/60 uppercase font-bold tracking-widest">{role || 'Usuário'}</p>
-                <p className="text-sm font-black text-white leading-none uppercase truncate max-w-[150px]">{displayName || user?.email?.split('@')[0] || 'Sammy'}</p>
+                <p className="text-xs text-blue-400 font-black uppercase tracking-widest mb-0.5">{role || 'Usuário'}</p>
+                <p className="text-base font-black text-white leading-tight uppercase truncate max-w-[200px]">{displayName || user?.email?.split('@')[0] || 'Sammy'}</p>
               </div>
               <button 
                 onClick={() => { setActiveMainTab('perfil'); window.scrollTo(0, 0); }}
-                className="w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center hover:bg-blue-500/20 transition-colors"
+                className="w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center hover:bg-blue-500/20 transition-all hover:scale-110 active:scale-95 group overflow-hidden"
                 title="Minha Conta"
               >
-                <User className="w-4 h-4 text-blue-500" />
+                {photoURL ? (
+                  <img src={photoURL} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-5 h-5 text-blue-500 group-hover:text-blue-400 transition-colors" />
+                )}
               </button>
               <button 
                 onClick={() => signOut(auth)}
-                className="w-10 h-10 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center hover:bg-red-500/20 transition-colors"
+                className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center hover:bg-red-500/20 transition-all hover:scale-110 active:scale-95 group"
                 title="Sair"
               >
-                <LogOut className="w-4 h-4 text-red-500 ml-0.5" />
+                <LogOut className="w-5 h-5 text-red-500 group-hover:text-red-400 transition-colors ml-1" />
               </button>
             </div>
           </div>
         </div>
+        
+        {/* Mobile Sidebar / Drawer Overlay */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-[100] md:hidden">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileMenuOpen(false)} />
+            <div className="absolute right-0 top-0 bottom-0 w-64 bg-[#0a0a0a] border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-300">
+              <div className="p-4 border-b border-white/10 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-black italic">MENU</span>
+                </div>
+                <button onClick={() => setIsMobileMenuOpen(false)} className="text-white p-2">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                <button 
+                  onClick={() => { setActiveMainTab('home'); setIsMobileMenuOpen(false); }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'home' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Home className="w-4 h-4" /> Home
+                  </div>
+                </button>
+                
+                {!isAfiliado && (
+                  <button 
+                    onClick={() => { setActiveMainTab('instalacoes'); setActiveSubTab('novo'); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'instalacoes' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <LayoutDashboard className="w-4 h-4" /> Instalações
+                    </div>
+                  </button>
+                )}
+
+                <div className="pt-4 border-t border-white/10 mt-4">
+                  <span className="px-4 text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-2 block">Sambox</span>
+                  
+                  {!isAfiliado && (
+                    <>
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('zap'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'zap') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <MessageCircle className="w-4 h-4" /> Ofertas
+                        </div>
+                      </button>
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('cupons_sambox'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'cupons_sambox') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Percent className="w-4 h-4" /> Cupons
+                        </div>
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-white/10 mt-4">
+                  <span className="px-4 text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-2 block">Steam</span>
+                  
+                  <button 
+                    onClick={() => { setActiveMainTab('keys'); setActiveSubTab('novo'); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'keys' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Key className="w-4 h-4" /> Keys Steam
+                    </div>
+                  </button>
+                  
+                  {!isAfiliado && (
+                    <>
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('vendas'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'vendas') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <DollarSign className="w-4 h-4" /> Ofertas
+                        </div>
+                      </button>
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('cupons_steam'); setIsMobileMenuOpen(false); }}
+                        className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'cupons_steam') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Percent className="w-4 h-4" /> Cupons
+                        </div>
+                      </button>
+                    </>
+                  )}
+
+                  {!isAfiliado && (
+                    <button 
+                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsMobileMenuOpen(false); }}
+                      className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'denuvo') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Gamepad2 className="w-4 h-4" /> Denuvo
+                      </div>
+                    </button>
+                  )}
+                </div>
+
+                {!isAfiliado && (
+                  <button 
+                    onClick={() => { setActiveMainTab('videos'); setActiveSubTab('galeria'); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'videos' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Video className="w-4 h-4" /> Vídeos
+                    </div>
+                  </button>
+                )}
+
+                <div className="pt-4 border-t border-white/10 mt-4">
+                  <button 
+                    onClick={() => { setActiveMainTab('others'); setActiveSubTab('afiliados'); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'afiliados') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Percent className="w-4 h-4" /> Afiliados
+                    </div>
+                  </button>
+                </div>
+
+              </div>
+              
+              <div className="p-4 border-t border-white/10 flex flex-col gap-2">
+                {isGerente && (
+                  <>
+                    <span className="px-4 text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-2 mb-1 block">Administração</span>
+                    <button 
+                      onClick={() => { setActiveMainTab('postar_aviso'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}
+                      className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'postar_aviso' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Megaphone className="w-4 h-4" /> Postar Aviso
+                      </div>
+                    </button>
+                  </>
+                )}
+                <button 
+                  onClick={() => { setActiveMainTab('perfil'); setIsMobileMenuOpen(false); window.scrollTo(0, 0); }}
+                  className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${activeMainTab === 'perfil' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <User className="w-4 h-4" /> Minha Conta
+                  </div>
+                </button>
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] text-red-500 hover:bg-red-500/10 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <LogOut className="w-4 h-4" /> Sair
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8">
         <div className="mb-6 md:mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 font-display">
           <div>
             <h1 className="text-xl md:text-2xl font-black text-white mb-1 uppercase tracking-tight">
-              {activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : activeMainTab === 'perfil' ? 'Minha Conta' : 'Outros'}
+              {activeMainTab === 'home' ? 'Mural de Notícias' : activeMainTab === 'postar_aviso' ? 'Publicar Aviso' : activeMainTab === 'financeiro' ? 'Gestão Financeira' : activeMainTab === 'instalacoes' ? 'Instalações Sambox' : activeMainTab === 'keys' ? 'Keys Steam' : activeMainTab === 'usuarios' ? 'Gerenciar Usuários' : activeMainTab === 'videos' ? 'Vídeos Tutoriais' : activeMainTab === 'perfil' ? 'Minha Conta' : (activeMainTab === 'others' && activeSubTab === 'denuvo' ? 'Denuvo' : activeMainTab === 'others' && activeSubTab === 'vendas' ? 'Ofertas Steam' : activeMainTab === 'others' && activeSubTab === 'zap' ? 'Ofertas Sambox' : activeMainTab === 'others' && activeSubTab === 'cupons_steam' ? 'Cupons Steam' : activeMainTab === 'others' && activeSubTab === 'cupons_sambox' ? 'Cupons Sambox' : 'Afiliados')}
             </h1>
             <p className="text-sm text-gray-500 font-medium">
-              {activeMainTab === 'financeiro' ? 'Controle de entradas e saídas em tempo real.' : activeMainTab === 'instalacoes' ? 'Registro e acompanhamento de novas instalações.' : activeMainTab === 'keys' ? 'Gerenciamento de chaves de ativação.' : activeMainTab === 'usuarios' ? 'Controle de acessos e permissões do sistema' : activeMainTab === 'videos' ? 'Galeria de tutoriais e treinamentos da equipe.' : activeMainTab === 'perfil' ? 'Gerencie seu perfil e configurações.' : 'Gerenciamento de links e ferramentas úteis.'}
+              {activeMainTab === 'home' ? 'Fique por dentro das últimas atualizações e avisos.' : activeMainTab === 'postar_aviso' ? 'Crie uma nova publicação para o feed de avisos do painel.' : activeMainTab === 'financeiro' ? 'Controle de entradas e saídas em tempo real.' : activeMainTab === 'instalacoes' ? 'Registro e acompanhamento de novas instalações.' : activeMainTab === 'keys' ? 'Gerenciamento de chaves de ativação.' : activeMainTab === 'usuarios' ? 'Controle de acessos e permissões do sistema' : activeMainTab === 'videos' ? 'Galeria de tutoriais e treinamentos da equipe.' : activeMainTab === 'perfil' ? 'Gerencie seu perfil e configurações.' : (activeMainTab === 'others' && activeSubTab === 'denuvo' ? 'Gerenciamento de Denuvo.' : activeMainTab === 'others' && activeSubTab === 'vendas' ? 'Ofertas e vendas para Steam.' : activeMainTab === 'others' && activeSubTab === 'zap' ? 'Ofertas e disparos Sambox.' : activeMainTab === 'others' && activeSubTab === 'cupons_steam' ? 'Gerenciamento de cupons de desconto Steam.' : activeMainTab === 'others' && activeSubTab === 'cupons_sambox' ? 'Gerenciamento de cupons de desconto Sambox.' : 'Recursos para afiliados.')}
             </p>
           </div>
           
           {/* Sub-menu Tabs */}
-          {activeMainTab !== 'usuarios' && (
+          {activeMainTab !== 'usuarios' && activeMainTab !== 'home' && activeMainTab !== 'perfil' && activeMainTab !== 'postar_aviso' && (
             <div className="flex bg-[#111111] p-1 rounded-xl border border-white/10 w-fit">
             {activeMainTab === 'videos' ? (
               <>
@@ -1336,19 +1890,35 @@ export default function Dashboard() {
               </>
             ) : (
               <>
-                {!isAfiliado && (
+                {!isAfiliado && (activeSubTab === 'zap' || activeSubTab === 'cupons_sambox') && (
                   <>
                     <button 
                       onClick={() => setActiveSubTab('zap')}
                       className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'zap' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                     >
-                      Sambox
+                      Ofertas Sambox
                     </button>
+                    <button 
+                      onClick={() => setActiveSubTab('cupons_sambox')}
+                      className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'cupons_sambox' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                      Cupons Sambox
+                    </button>
+                  </>
+                )}
+                {!isAfiliado && (activeSubTab === 'vendas' || activeSubTab === 'cupons_steam' || activeSubTab === 'denuvo') && (
+                  <>
                     <button 
                       onClick={() => setActiveSubTab('vendas')}
                       className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'vendas' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
                     >
-                      Sambox Steam
+                      Ofertas Steam
+                    </button>
+                    <button 
+                      onClick={() => setActiveSubTab('cupons_steam')}
+                      className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'cupons_steam' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                      Cupons Steam
                     </button>
                     <button 
                       onClick={() => setActiveSubTab('denuvo')}
@@ -1358,17 +1928,170 @@ export default function Dashboard() {
                     </button>
                   </>
                 )}
-                <button 
-                  onClick={() => setActiveSubTab('afiliados')}
-                  className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'afiliados' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
-                >
-                  Links Afiliados
-                </button>
+                {activeSubTab === 'afiliados' && (
+                  <button 
+                    onClick={() => setActiveSubTab('afiliados')}
+                    className={`px-5 py-2.5 rounded-lg text-sm font-black uppercase tracking-wider transition-all ${activeSubTab === 'afiliados' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    Afiliados
+                  </button>
+                )}
               </>
             )}
           </div>
           )}
         </div>
+
+        {activeMainTab === 'postar_aviso' && isGerente && (
+          <div className="bg-[#111111] p-6 rounded-2xl border border-white/10 shadow-2xl mb-8 max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-blue-500" />
+                {editingNoticiaId ? 'Editar Aviso' : 'Publicar Novo Aviso'}
+              </h2>
+              {editingNoticiaId && (
+                <button 
+                  onClick={cancelEditingNoticia}
+                  className="text-xs font-bold text-red-500 uppercase hover:text-red-400 transition-colors"
+                >
+                  Cancelar Edição
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleCreateNoticia} className="space-y-4">
+              <input 
+                type="text" 
+                placeholder="Título do aviso..."
+                value={novaNoticia.titulo}
+                onChange={(e) => setNovaNoticia({...novaNoticia, titulo: e.target.value})}
+                className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600 transition-all font-bold"
+                required
+              />
+              <div className="bg-[#080808] rounded-xl border border-white/10">
+                <RichTextEditor 
+                  value={novaNoticia.conteudo}
+                  onChange={(value) => setNovaNoticia({...novaNoticia, conteudo: value})}
+                  placeholder="Escreva o conteúdo do post (permitido HTML, Listas, Imagens)..."
+                />
+              </div>
+              <div className="flex justify-end pt-2">
+                <button 
+                  type="submit"
+                  disabled={isSubmittingNoticia}
+                  className={`px-6 py-2.5 ${editingNoticiaId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'} text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-600/20`}
+                >
+                  {isSubmittingNoticia ? 'Salvando...' : editingNoticiaId ? 'Salvar Alterações' : 'Publicar Aviso'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {activeMainTab === 'home' && (
+          <div className="space-y-6 max-w-4xl mx-auto">
+
+            <div className="flex flex-col gap-6">
+              {noticias.length > 0 ? noticias.slice((noticiasCurrentPage - 1) * noticiasPerPage, noticiasCurrentPage * noticiasPerPage).map(noticia => (
+                <div key={noticia.id} className="w-full min-w-0 bg-[#0a0a0a] rounded-2xl border border-white/5 shadow-xl hover:border-blue-500/20 transition-colors flex flex-col overflow-hidden relative group">
+                  <div className="p-6 md:p-8 flex-1 flex flex-col relative z-10 min-w-0">
+                    <div className="flex justify-between items-start mb-6">
+                      <h3 className="text-lg md:text-xl font-bold text-white leading-tight break-words">{noticia.titulo}</h3>
+                      {isGerente && (
+                        <div className="flex items-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button 
+                            onClick={() => startEditingNoticia(noticia)}
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                            title="Editar Notícia"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteNoticia(noticia.id)}
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                            title="Deletar Notícia"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="ql-snow">
+                      <div 
+                        className={`w-full text-white text-xs md:text-sm mb-6 flex-1 ql-editor prose prose-invert max-w-none whitespace-pre-wrap
+                          prose-p:leading-relaxed prose-p:my-2 prose-p:break-words
+                          prose-headings:font-bold prose-headings:text-white prose-headings:mt-6 prose-headings:mb-3 prose-headings:tracking-tight
+                          prose-ul:list-disc prose-ul:ml-8 prose-ul:my-8
+                          prose-ol:list-decimal prose-ol:ml-8 prose-ol:my-8
+                          prose-li:my-3 prose-li:marker:text-blue-500 prose-li:pl-2
+                          prose-a:text-blue-400 prose-a:font-black prose-a:no-underline hover:prose-a:underline
+                          prose-img:rounded-3xl prose-img:shadow-2xl prose-img:my-10 prose-img:border prose-img:border-white/10
+                          prose-strong:text-white prose-strong:font-black prose-blockquote:border-l-4 prose-blockquote:border-blue-500 prose-blockquote:pl-6 prose-blockquote:italic`} 
+                        dangerouslySetInnerHTML={{ __html: noticia.conteudo }} 
+                      />
+                    </div>
+                    <div className="flex items-center justify-between mt-auto pt-6 border-t border-white/10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center overflow-hidden">
+                          {noticia.authorPhotoURL ? (
+                            <img src={noticia.authorPhotoURL} alt="Author" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <User className="w-5 h-5 text-blue-500" />
+                          )}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-white font-black uppercase tracking-widest leading-none">{noticia.author}</span>
+                          <span className="text-[9px] text-blue-400 font-black uppercase tracking-widest mt-1">
+                            {noticia.updatedAt !== noticia.createdAt ? 'Atualizado' : 'Autor da Publicação'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-500 font-bold uppercase tracking-widest bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
+                        {new Date(noticia.updatedAt || noticia.createdAt).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 to-transparent pointer-events-none" />
+                </div>
+              )) : (
+                <div className="col-span-full py-12 text-center border border-white/5 bg-[#111111] rounded-2xl">
+                  <Megaphone className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 font-medium">Nenhum aviso no momento.</p>
+                </div>
+              )}
+            </div>
+            
+            {/* Pagination Controls for Noticias */}
+            {noticias.length > noticiasPerPage && (
+              <div className="flex items-center justify-center gap-2 mt-8">
+                <button
+                  onClick={() => setNoticiasCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={noticiasCurrentPage === 1}
+                  className="p-2 rounded-lg bg-white/5 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/10 transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.ceil(noticias.length / noticiasPerPage) }).map((_, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setNoticiasCurrentPage(idx + 1)}
+                      className={`w-8 h-8 rounded-lg text-xs font-bold transition-colors ${noticiasCurrentPage === idx + 1 ? 'bg-blue-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                    >
+                      {idx + 1}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setNoticiasCurrentPage(prev => Math.min(prev + 1, Math.ceil(noticias.length / noticiasPerPage)))}
+                  disabled={noticiasCurrentPage === Math.ceil(noticias.length / noticiasPerPage)}
+                  className="p-2 rounded-lg bg-white/5 text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/10 transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {activeMainTab === 'financeiro' && isAdmin && (
           <>
@@ -2533,7 +3256,7 @@ export default function Dashboard() {
                 <div>
                   <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                     <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
-                    Links de Venda Rápidos - Sambox
+                    Links de Venda Rápidos - Ofertas Sambox
                   </h2>
                   
                   {/* List of Links */}
@@ -2547,13 +3270,22 @@ export default function Dashboard() {
                           </div>
                           <div className="flex gap-2">
                             {isGerente && (
-                              <button
-                                onClick={() => setLinkToDelete({ id: item.id, type: 'sambox' })}
-                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
-                                title="Apagar Link"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => startEditingLink(item, 'sambox')}
+                                  className="p-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                  title="Editar Link"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setLinkToDelete({ id: item.id, type: 'sambox' })}
+                                  className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                  title="Apagar Link"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
                             )}
                             <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
                               <DollarSign className="w-4 h-4" />
@@ -2567,22 +3299,6 @@ export default function Dashboard() {
                           >
                             <Download className="w-4 h-4" /> Copiar Link
                           </button>
-                          {item.cupons && item.cupons.length > 0 && (
-                            <div className="flex flex-col gap-2 mt-1">
-                              {item.cupons.map((cupom, cIdx) => (
-                                <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
-                                  <span>Cupom: {cupom}</span>
-                                  <button 
-                                    onClick={() => copyToClipboard(`Cupom: ${cupom}`)}
-                                    className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded-md"
-                                    title="Copiar Cupom"
-                                  >
-                                    <Download className="w-3 h-3" /> Copiar
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -2595,8 +3311,20 @@ export default function Dashboard() {
 
                   {/* Registration Form */}
                   {isGerente && (
-                    <div className="border-t border-white/10 pt-8">
-                      <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
+                    <div className="border-t border-white/10 pt-8" id="sambox-form">
+                      <div className="flex justify-between items-center mb-5">
+                        <h3 className="text-base font-bold text-white uppercase tracking-widest">
+                          {editingLink?.type === 'sambox' ? 'Editar Link' : 'Cadastrar Novo Link'}
+                        </h3>
+                        {editingLink?.type === 'sambox' && (
+                          <button 
+                            onClick={cancelEditing}
+                            className="text-xs text-red-500 font-black uppercase tracking-widest hover:text-red-400 transition-colors"
+                          >
+                            Cancelar Edição
+                          </button>
+                        )}
+                      </div>
                       <form onSubmit={handleSamboxLinkSubmit} className="space-y-5">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                           <div>
@@ -2639,24 +3367,13 @@ export default function Dashboard() {
                               className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
                             />
                           </div>
-                          <div>
-                            <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
-                            <input 
-                              type="text" 
-                              name="cupons"
-                              value={samboxLinkFormData.cupons}
-                              onChange={handleSamboxLinkInputChange}
-                              placeholder="Ex: DESC10, PROMO20"
-                              className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
-                            />
-                          </div>
                         </div>
 
                         <button 
                           type="submit"
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                          className={`w-full ${editingLink?.type === 'sambox' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'bg-blue-600 hover:bg-blue-700 shadow-[0_0_30_px_rgba(37,99,235,0.3)]'} text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all active:scale-[0.98]`}
                         >
-                          CADASTRAR LINK
+                          {editingLink?.type === 'sambox' ? 'SALVAR ALTERAÇÕES' : 'CADASTRAR LINK'}
                         </button>
                       </form>
                     </div>
@@ -2735,7 +3452,7 @@ export default function Dashboard() {
               <div className="bg-[#111111] rounded-2xl p-6 md:p-8 border border-white/10 shadow-2xl">
                 <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                   <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
-                  Links de Venda Rápidos - Sambox Steam
+                  Links de Venda Rápidos - Ofertas Steam
                 </h2>
                 
                 {/* List of Links */}
@@ -2749,13 +3466,22 @@ export default function Dashboard() {
                         </div>
                         <div className="flex gap-2">
                           {isGerente && (
-                            <button
-                              onClick={() => setLinkToDelete({ id: item.id, type: 'steam' })}
-                              className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
-                              title="Apagar Link"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => startEditingLink(item, 'steam')}
+                                className="p-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                title="Editar Link"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setLinkToDelete({ id: item.id, type: 'steam' })}
+                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                title="Apagar Link"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
                           <div className="p-2 rounded-lg bg-blue-600/10 text-blue-500">
                             <DollarSign className="w-4 h-4" />
@@ -2769,22 +3495,6 @@ export default function Dashboard() {
                         >
                           <Download className="w-4 h-4" /> Copiar Link
                         </button>
-                        {item.cupons && item.cupons.length > 0 && (
-                          <div className="flex flex-col gap-2 mt-1">
-                            {item.cupons.map((cupom, cIdx) => (
-                              <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
-                                <span>Cupom: {cupom}</span>
-                                <button 
-                                  onClick={() => copyToClipboard(`Cupom: ${cupom}`)}
-                                  className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded-md"
-                                  title="Copiar Cupom"
-                                >
-                                  <Download className="w-3 h-3" /> Copiar
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -2798,7 +3508,19 @@ export default function Dashboard() {
                 {/* Registration Form */}
                 {isGerente && (
                   <div className="border-t border-white/10 pt-8">
-                    <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Novo Link</h3>
+                    <div className="flex justify-between items-center mb-5">
+                      <h3 className="text-base font-bold text-white uppercase tracking-widest">
+                        {editingLink?.type === 'steam' ? 'Editar Link' : 'Cadastrar Novo Link'}
+                      </h3>
+                      {editingLink?.type === 'steam' && (
+                        <button 
+                          onClick={cancelEditing}
+                          className="text-xs text-red-500 font-black uppercase tracking-widest hover:text-red-400 transition-colors"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
                     <form onSubmit={handleSteamLinkSubmit} className="space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
@@ -2841,28 +3563,327 @@ export default function Dashboard() {
                             className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all"
                           />
                         </div>
-                        <div>
-                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Cupons (separados por vírgula)</label>
-                          <input 
-                            type="text" 
-                            name="cupons"
-                            value={steamLinkFormData.cupons}
-                            onChange={handleSteamLinkInputChange}
-                            placeholder="Ex: DESC10, PROMO20"
-                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
-                          />
-                        </div>
                       </div>
 
                       <button 
                         type="submit"
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                        className={`w-full ${editingLink?.type === 'steam' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'bg-blue-600 hover:bg-blue-700 shadow-[0_0_30px_rgba(37,99,235,0.3)]'} text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all active:scale-[0.98]`}
                       >
-                        CADASTRAR LINK
+                        {editingLink?.type === 'steam' ? 'SALVAR ALTERAÇÕES' : 'CADASTRAR LINK'}
                       </button>
                     </form>
                   </div>
                 )}
+              </div>
+            )}
+
+            {activeSubTab === 'cupons_sambox' && (
+              <div className="bg-[#111111] rounded-2xl p-6 md:p-8 border border-white/10 shadow-2xl flex flex-col gap-12">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
+                    Gerenciamento de Cupons - Sambox
+                  </h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+                    {samboxCuponsList.map((cupom) => (
+                      <div key={cupom.id} className="bg-[#080808] border border-white/5 rounded-xl p-5 flex flex-col gap-3 hover:border-emerald-500/30 transition-all group">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-black text-white uppercase tracking-tight">{cupom.nome}</h4>
+                          </div>
+                          <div className="flex gap-2">
+                            {isGerente && (
+                              <>
+                                <button
+                                  onClick={() => startEditingCupom(cupom, 'sambox')}
+                                  className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                                  title="Editar"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setCupomToDelete({ id: cupom.id, type: 'sambox' })}
+                                  className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                  title="Apagar"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            <div className="p-2 rounded-lg bg-emerald-600/10 text-emerald-500">
+                              <Percent className="w-4 h-4" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-col gap-2">
+                          {cupom.cupons && cupom.cupons.map((c, cIdx) => (
+                            <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
+                              <div className="flex flex-col">
+                                <span className="text-white/90">Cupom: <span className="text-emerald-400">{c.codigo}</span></span>
+                                {c.valor && <span className="text-[10px] text-emerald-500/70">Valor: {c.valor}</span>}
+                              </div>
+                              <button 
+                                onClick={() => copyToClipboard(c.codigo)}
+                                className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1.5 rounded-md cursor-pointer font-black text-[9px] uppercase tracking-widest"
+                                title="Copiar Cupom"
+                              >
+                                <Copy className="w-3 h-3" /> COPIAR CÓDIGO
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {samboxCuponsList.length === 0 && (
+                      <div className="col-span-full text-center py-8 text-gray-500 text-sm font-medium">
+                        Nenhuma oferta de cupons cadastrada ainda para Sambox.
+                      </div>
+                    )}
+                  </div>
+
+                  {isGerente && (
+                    <div className="bg-[#0a0a0a] border border-white/5 p-6 rounded-2xl w-full max-w-xl">
+                      <h4 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                        <Plus className="w-4 h-4 text-emerald-500" />
+                        {editingCupom?.type === 'sambox' ? 'Editar Oferta de Cupons' : 'Nova Oferta de Cupons - Sambox'}
+                      </h4>
+                      <form onSubmit={handleSamboxCupomSubmit} className="space-y-6">
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">NOME DE REFERÊNCIA</label>
+                          <input 
+                            type="text" 
+                            name="nome"
+                            value={samboxCupomFormData.nome}
+                            onChange={(e) => setSamboxCupomFormData(prev => ({ ...prev, nome: e.target.value }))}
+                            placeholder="Ex: Mega Promoção"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all font-medium"
+                          />
+                        </div>
+
+                        <div className="bg-white/5 p-4 rounded-xl border border-white/5">
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-4 ml-1 flex justify-between items-center">
+                            <span>Cupons e Valores</span>
+                            <button 
+                              type="button" 
+                              onClick={() => addCouponToForm('samboxCupom')}
+                              className="text-[10px] bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-all font-black flex items-center gap-1.5"
+                            >
+                              <Plus className="w-3 h-3" /> Adicionar outro cupom
+                            </button>
+                          </label>
+                          <div className="space-y-3">
+                            {samboxCupomFormData.cupons.map((c, index) => (
+                              <div key={index} className="flex gap-3 items-end group">
+                                <div className="flex-[2]">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">CÓDIGO DO CUPOM</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.codigo}
+                                    onChange={(e) => handleCouponChange('samboxCupom', index, 'codigo', e.target.value)}
+                                    placeholder="Ex: SAMBOX50"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all"
+                                  />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">VALOR DO DESCONTO</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.valor}
+                                    onChange={(e) => handleCouponChange('samboxCupom', index, 'valor', e.target.value)}
+                                    placeholder="Ex: R$ 20,00"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all"
+                                  />
+                                </div>
+                                {samboxCupomFormData.cupons.length > 1 && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => removeCouponFromForm('samboxCupom', index)}
+                                    className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition-all mb-0.5"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button 
+                          type="submit"
+                          className={`w-full ${editingCupom?.type === 'sambox' ? 'bg-blue-600 hover:bg-blue-700 shadow-[0_0_30px_rgba(37,99,235,0.3)]' : 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_0_30_px_rgba(16,185,129,0.3)]'} text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all active:scale-[0.98]`}
+                        >
+                          {editingCupom?.type === 'sambox' ? 'SALVAR ALTERAÇÕES' : 'CADASTRAR OFERTA'}
+                        </button>
+                        {editingCupom?.type === 'sambox' && (
+                          <button 
+                            type="button"
+                            onClick={cancelEditingCupom}
+                            className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-bold text-xs uppercase tracking-widest rounded-xl px-4 py-4 mt-2 transition-all"
+                          >
+                            CANCELAR EDIÇÃO
+                          </button>
+                        )}
+                      </form>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeSubTab === 'cupons_steam' && (
+              <div className="bg-[#111111] rounded-2xl p-6 md:p-8 border border-white/10 shadow-2xl flex flex-col gap-12">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
+                    Gerenciamento de Cupons - Steam
+                  </h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+                    {steamCuponsList.map((cupom) => (
+                      <div key={cupom.id} className="bg-[#080808] border border-white/5 rounded-xl p-5 flex flex-col gap-3 hover:border-emerald-500/30 transition-all group">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="text-sm font-black text-white uppercase tracking-tight">{cupom.nome}</h4>
+                          </div>
+                          <div className="flex gap-2">
+                            {isGerente && (
+                              <>
+                                <button
+                                  onClick={() => startEditingCupom(cupom, 'steam')}
+                                  className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                                  title="Editar"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => setCupomToDelete({ id: cupom.id, type: 'steam' })}
+                                  className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                  title="Apagar"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            <div className="p-2 rounded-lg bg-emerald-600/10 text-emerald-500">
+                              <Percent className="w-4 h-4" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-col gap-2">
+                          {cupom.cupons && cupom.cupons.map((c, cIdx) => (
+                            <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
+                              <div className="flex flex-col">
+                                <span className="text-white/90">Cupom: <span className="text-emerald-400">{c.codigo}</span></span>
+                                {c.valor && <span className="text-[10px] text-emerald-500/70">Valor: {c.valor}</span>}
+                              </div>
+                              <button 
+                                onClick={() => copyToClipboard(c.codigo)}
+                                className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1.5 rounded-md cursor-pointer font-black text-[9px] uppercase tracking-widest"
+                                title="Copiar Cupom"
+                              >
+                                <Copy className="w-3 h-3" /> COPIAR CÓDIGO
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {steamCuponsList.length === 0 && (
+                      <div className="col-span-full text-center py-8 text-gray-500 text-sm font-medium">
+                        Nenhuma oferta de cupons cadastrada ainda para Steam.
+                      </div>
+                    )}
+                  </div>
+
+                  {isGerente && (
+                    <div className="bg-[#0a0a0a] border border-white/5 p-6 rounded-2xl w-full max-w-xl">
+                      <h4 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                        <Plus className="w-4 h-4 text-emerald-500" />
+                        {editingCupom?.type === 'steam' ? 'Editar Oferta de Cupons' : 'Nova Oferta de Cupons - Steam'}
+                      </h4>
+                      <form onSubmit={handleSteamCupomSubmit} className="space-y-6">
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">NOME DE REFERÊNCIA</label>
+                          <input 
+                            type="text" 
+                            name="nome"
+                            value={steamCupomFormData.nome}
+                            onChange={(e) => setSteamCupomFormData(prev => ({ ...prev, nome: e.target.value }))}
+                            placeholder="Ex: Primavera Steam"
+                            required
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all font-medium"
+                          />
+                        </div>
+
+                        <div className="bg-white/5 p-4 rounded-xl border border-white/5">
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-4 ml-1 flex justify-between items-center">
+                            <span>Cupons e Valores</span>
+                            <button 
+                              type="button" 
+                              onClick={() => addCouponToForm('steamCupom')}
+                              className="text-[10px] bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-all font-black flex items-center gap-1.5"
+                            >
+                              <Plus className="w-3 h-3" /> Adicionar outro cupom
+                            </button>
+                          </label>
+                          <div className="space-y-3">
+                            {steamCupomFormData.cupons.map((c, index) => (
+                              <div key={index} className="flex gap-3 items-end group">
+                                <div className="flex-[2]">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">CÓDIGO DO CUPOM</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.codigo}
+                                    onChange={(e) => handleCouponChange('steamCupom', index, 'codigo', e.target.value)}
+                                    placeholder="Ex: STEAM50"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all"
+                                  />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">VALOR DO DESCONTO</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.valor}
+                                    onChange={(e) => handleCouponChange('steamCupom', index, 'valor', e.target.value)}
+                                    placeholder="Ex: R$ 20,00"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-emerald-600 transition-all"
+                                  />
+                                </div>
+                                {steamCupomFormData.cupons.length > 1 && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => removeCouponFromForm('steamCupom', index)}
+                                    className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition-all mb-0.5"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button 
+                          type="submit"
+                          className={`w-full ${editingCupom?.type === 'steam' ? 'bg-blue-600 hover:bg-blue-700 shadow-[0_0_30px_rgba(37,99,235,0.3)]' : 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_0_30_px_rgba(16,185,129,0.3)]'} text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all active:scale-[0.98]`}
+                        >
+                          {editingCupom?.type === 'steam' ? 'SALVAR ALTERAÇÕES' : 'CADASTRAR OFERTA'}
+                        </button>
+                        {editingCupom?.type === 'steam' && (
+                          <button 
+                            type="button"
+                            onClick={cancelEditingCupom}
+                            className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-bold text-xs uppercase tracking-widest rounded-xl px-4 py-4 mt-2 transition-all"
+                          >
+                            CANCELAR EDIÇÃO
+                          </button>
+                        )}
+                      </form>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -2972,7 +3993,7 @@ export default function Dashboard() {
                           {denuvoPrints.map(print => (
                             <div key={print.id} className="bg-[#080808] border border-white/5 rounded-xl overflow-hidden flex flex-col group">
                               <div className="h-40 bg-[#111] overflow-hidden relative">
-                                <img src={print.imageUrl} alt={print.gameName} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                <Image src={print.imageUrl} alt={print.gameName} fill referrerPolicy="no-referrer" className="object-cover group-hover:scale-105 transition-transform duration-500" />
                               </div>
                               <div className="p-4 flex items-center justify-between">
                                 <h4 className="text-sm font-black text-white uppercase tracking-tight">{print.gameName}</h4>
@@ -3027,29 +4048,47 @@ export default function Dashboard() {
                               <h4 className="text-sm font-black text-white uppercase tracking-tight">{item.titulo}</h4>
                               <p className="text-blue-500 font-black text-lg mt-1">{item.valorCupom}</p>
                             </div>
-                            {isGerente && (
-                              <button
-                                onClick={() => setLinkToDelete({ id: item.id, type: 'afiliado' })}
-                                className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
-                                title="Apagar Oferta"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
+                            <div className="flex gap-2">
+                              {isGerente && (
+                                <>
+                                  <button
+                                    onClick={() => startEditingLink(item, 'afiliado')}
+                                    className="p-2 rounded-lg bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors"
+                                    title="Editar Oferta"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => setLinkToDelete({ id: item.id, type: 'afiliado' })}
+                                    className="p-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                                    title="Apagar Oferta"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
                           <div className="mt-2 flex flex-col gap-2">
-                            {item.cupons.map((cupom, cIdx) => (
-                              <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
-                                <span>Cupom: {cupom}</span>
-                                <button 
-                                  onClick={() => copyToClipboard(cupom)}
-                                  className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2 py-1 rounded-md"
-                                  title="Copiar Cupom"
-                                >
-                                  <Copy className="w-3 h-3" /> Copiar
-                                </button>
-                              </div>
-                            ))}
+                            {item.cupons.map((cupom: any, cIdx) => {
+                              const codigo = typeof cupom === 'string' ? parseCouponDetail(cupom).code : cupom.codigo;
+                              const valor = typeof cupom === 'string' ? parseCouponDetail(cupom).value : cupom.valor;
+                              return (
+                                <div key={cIdx} className="w-full py-2.5 bg-emerald-600/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase rounded-lg flex items-center justify-between px-4">
+                                  <div className="flex flex-col">
+                                    <span className="text-white/90">Cupom: <span className="text-emerald-400">{codigo}</span></span>
+                                    {valor && <span className="text-[10px] text-emerald-500/70">Valor: {valor}</span>}
+                                  </div>
+                                  <button 
+                                    onClick={() => copyToClipboard(codigo)}
+                                    className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1.5 rounded-md font-black text-[9px] uppercase tracking-widest"
+                                    title="Copiar Cupom"
+                                  >
+                                    <Copy className="w-3 h-3" /> COPIAR CÓDIGO
+                                  </button>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))
@@ -3063,8 +4102,20 @@ export default function Dashboard() {
 
                 {/* Registration Form */}
                 {isGerente && (
-                  <div className="border-t border-white/10 pt-8">
-                    <h3 className="text-base font-bold text-white mb-5 uppercase tracking-widest">Cadastrar Nova Oferta para Afiliados</h3>
+                  <div className="border-t border-white/10 pt-8" id="afiliado-form">
+                    <div className="flex justify-between items-center mb-5">
+                      <h3 className="text-base font-bold text-white uppercase tracking-widest">
+                        {editingLink?.type === 'afiliado' ? 'Editar Oferta para Afiliados' : 'Cadastrar Nova Oferta para Afiliados'}
+                      </h3>
+                      {editingLink?.type === 'afiliado' && (
+                        <button 
+                          onClick={cancelEditing}
+                          className="text-xs text-red-500 font-black uppercase tracking-widest hover:text-red-400 transition-colors"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
                     <form onSubmit={handleAfiliadoSubmit} className="space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
@@ -3094,23 +4145,60 @@ export default function Dashboard() {
                       </div>
                       
                       <div>
-                        <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nomes dos Cupons (separados por vírgula)</label>
-                        <input 
-                          type="text" 
-                          name="cupons"
-                          value={afiliadoFormData.cupons}
-                          onChange={handleAfiliadoInputChange}
-                          placeholder="Ex: PROMO10, SAMBOX10"
-                          required
-                          className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all uppercase"
-                        />
+                        <div className="bg-white/5 p-4 rounded-xl border border-white/5">
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-4 ml-1 flex justify-between items-center">
+                            <span>Cupons e Valores</span>
+                            <button 
+                              type="button" 
+                              onClick={() => addCouponToForm('afiliado')}
+                              className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition-all font-black"
+                            >
+                              + Adicionar Cupom
+                            </button>
+                          </label>
+                          <div className="space-y-3">
+                            {afiliadoFormData.cupons.map((c, index) => (
+                              <div key={index} className="flex gap-3 items-end group">
+                                <div className="flex-[2]">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">Código</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.codigo}
+                                    onChange={(e) => handleCouponChange('afiliado', index, 'codigo', e.target.value)}
+                                    placeholder="Código"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600 transition-all"
+                                  />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1 ml-1">Valor</label>
+                                  <input 
+                                    type="text" 
+                                    value={c.valor}
+                                    onChange={(e) => handleCouponChange('afiliado', index, 'valor', e.target.value)}
+                                    placeholder="Ex: R$ 20,00"
+                                    className="w-full bg-[#080808] border border-white/10 rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-600 transition-all"
+                                  />
+                                </div>
+                                {afiliadoFormData.cupons.length > 1 && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => removeCouponFromForm('afiliado', index)}
+                                    className="p-3 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500/20 transition-all mb-0.5"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
 
                       <button 
                         type="submit"
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] active:scale-[0.98]"
+                        className={`w-full ${editingLink?.type === 'afiliado' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-[0_0_30px_rgba(16,185,129,0.3)]' : 'bg-blue-600 hover:bg-blue-700 shadow-[0_0_30px_rgba(37,99,235,0.3)]'} text-white font-black text-sm uppercase tracking-[0.2em] rounded-xl px-4 py-5 mt-4 transition-all active:scale-[0.98]`}
                       >
-                        CADASTRAR OFERTA
+                        {editingLink?.type === 'afiliado' ? 'SALVAR ALTERAÇÕES' : 'CADASTRAR OFERTA'}
                       </button>
                     </form>
                   </div>
@@ -3328,8 +4416,18 @@ export default function Dashboard() {
           <div className="max-w-2xl mx-auto space-y-6">
             <div className="bg-[#111111] rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
               <div className="p-8 text-center bg-gradient-to-b from-blue-600/10 to-transparent">
-                <div className="w-24 h-24 rounded-full bg-blue-600/20 border-2 border-blue-500/30 flex items-center justify-center mx-auto mb-4 shadow-2xl">
-                  <User className="w-10 h-10 text-blue-500" />
+                <div className="w-24 h-24 rounded-full bg-blue-600/20 border-2 border-blue-500/30 flex items-center justify-center mx-auto mb-4 shadow-2xl overflow-hidden relative group">
+                  {photoURL ? (
+                    <Image src={photoURL || ''} alt="Perfil" fill referrerPolicy="no-referrer" className="object-cover" />
+                  ) : (
+                    <User className="w-10 h-10 text-blue-500" />
+                  )}
+                  <div 
+                    onClick={() => { setNewDisplayName(displayName || ''); setNewPhotoURL(photoURL || ''); setIsEditingProfile(true); }}
+                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                  >
+                    <Edit2 className="w-6 h-6 text-white" />
+                  </div>
                 </div>
                 <h2 className="text-2xl font-black text-white uppercase tracking-tight">{displayName || user?.email?.split('@')[0]}</h2>
                 <span className={`inline-block px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] mt-2 ${
@@ -3344,29 +4442,38 @@ export default function Dashboard() {
               <div className="p-8 space-y-6">
                 <div className="grid grid-cols-1 gap-6">
                   <div>
-                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Nome de Exibição</label>
+                    <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Configurações de Perfil</label>
                     {isEditingProfile ? (
-                      <div className="flex gap-2">
+                      <div className="flex flex-col gap-3">
                         <input 
                           type="text"
                           value={newDisplayName}
                           onChange={(e) => setNewDisplayName(e.target.value)}
-                          placeholder="Seu nome..."
-                          className="flex-1 bg-black/50 border border-blue-500/30 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                          placeholder="Seu nome de exibição..."
+                          className="w-full bg-black/50 border border-blue-500/30 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
                         />
-                        <button 
-                          onClick={handleUpdateProfile}
-                          disabled={isSavingProfile}
-                          className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => setIsEditingProfile(false)}
-                          className="px-4 py-3 bg-white/5 text-gray-400 rounded-xl hover:bg-white/10 transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <input 
+                          type="url"
+                          value={newPhotoURL}
+                          onChange={(e) => setNewPhotoURL(e.target.value)}
+                          placeholder="URL da sua foto (ex: https://imgur.com/...)"
+                          className="w-full bg-black/50 border border-blue-500/30 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                        />
+                        <div className="flex gap-2 justify-end mt-2">
+                          <button 
+                            onClick={handleUpdateProfile}
+                            disabled={isSavingProfile}
+                            className="px-6 py-3 bg-blue-600 text-white font-bold text-xs uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
+                          >
+                            Salvar Alterações
+                          </button>
+                          <button 
+                            onClick={() => setIsEditingProfile(false)}
+                            className="px-6 py-3 bg-white/5 text-gray-400 font-bold text-xs uppercase tracking-widest rounded-xl hover:bg-white/10 transition-all"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between bg-black/50 border border-white/5 rounded-xl px-4 py-4">
@@ -3636,6 +4743,37 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Modal de Confirmação de Exclusão de Notícia */}
+      {noticiaToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Apagar Notícia?</h3>
+              <p className="text-sm text-gray-400 mb-6">
+                Tem certeza que deseja apagar esta notícia do mural? Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setNoticiaToDelete(null)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmDeleteNoticia}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-[0_0_20px_rgba(220,38,38,0.3)]"
+                >
+                  Apagar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal de Confirmação de Exclusão de Link */}
       {linkToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -3667,6 +4805,37 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Modal de Confirmação de Exclusão de Cupom */}
+      {cupomToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Apagar Cupom?</h3>
+              <p className="text-sm text-gray-400 mb-6">
+                Tem certeza que deseja apagar este cupom? Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setCupomToDelete(null)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmDeleteCupom}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-[0_0_20px_rgba(220,38,38,0.3)]"
+                >
+                  Apagar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <footer className="mt-auto border-t border-white/10 bg-[#0a0a0a] py-4 md:py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -3677,6 +4846,12 @@ export default function Dashboard() {
           {isGerente && (
             <div className="flex items-center gap-2 md:gap-4 flex-wrap justify-center">
               <span className="text-xs text-gray-500 font-bold uppercase tracking-widest hidden md:inline-block">Administração</span>
+              <button 
+                onClick={() => { setActiveMainTab('postar_aviso'); window.scrollTo(0, 0); }}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-[0.15em] transition-all flex items-center gap-2 ${activeMainTab === 'postar_aviso' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'}`}
+              >
+                <Megaphone className="w-4 h-4" /> Postar
+              </button>
               {isAdmin && (
                 <button 
                   onClick={() => { setActiveMainTab('financeiro'); window.scrollTo(0, 0); }}

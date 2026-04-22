@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { collection, query, where, getDocs, updateDoc, doc, serverTimestamp, limit } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
@@ -128,8 +129,8 @@ export default function Auth() {
     <div className="min-h-screen bg-[#000d1a] flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden">
-            <img src="/samboxlogo.fw.png" alt="Sambox Logo" className="w-full h-full object-contain" />
+          <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden relative">
+            <Image src="/samboxlogo.fw.png" alt="Sambox Logo" fill className="object-contain" />
           </div>
         </div>
         <h2 className="mt-6 text-center text-3xl font-black text-white tracking-tight uppercase italic">

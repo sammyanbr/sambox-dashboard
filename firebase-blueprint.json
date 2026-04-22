@@ -25,6 +25,12 @@
             "rejected"
           ]
         },
+        "displayName": {
+          "type": "string"
+        },
+        "photoURL": {
+          "type": "string"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -87,20 +93,81 @@
     },
     "QuickLink": {
       "title": "Quick Sales Link",
-      "description": "Quick link for sales with coupons",
+      "description": "Quick link for sales",
       "type": "object",
       "properties": {
         "nome": { "type": "string" },
         "valor": { "type": "string" },
         "link": { "type": "string", "format": "uri" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["nome", "valor", "link", "createdBy", "createdAt", "updatedAt", "updatedBy"]
+    },
+    "CupomItem": {
+      "title": "Cupom Item",
+      "description": "A standalone coupon item",
+      "type": "object",
+      "properties": {
+        "nome": { "type": "string" },
         "cupons": { 
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "object",
+            "properties": {
+              "codigo": { "type": "string" },
+              "valor": { "type": "string" }
+            }
+          }
         },
         "createdBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
       },
-      "required": ["nome", "valor", "link", "createdBy", "createdAt"]
+      "required": ["nome", "cupons", "createdBy", "createdAt", "updatedAt", "updatedBy"]
+    },
+    "Noticia": {
+      "title": "Notícia/Aviso",
+      "description": "News or announcement posted on the mural",
+      "type": "object",
+      "properties": {
+        "titulo": { "type": "string" },
+        "conteudo": { "type": "string" },
+        "author": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorPhotoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["titulo", "conteudo", "author", "authorId", "createdAt", "updatedAt", "updatedBy"]
+    },
+    "AfiliadoOferta": {
+      "title": "Afiliado Oferta",
+      "description": "Sales offer for affiliates",
+      "type": "object",
+      "properties": {
+        "titulo": { "type": "string" },
+        "valorCupom": { "type": "string" },
+        "cupons": { 
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "codigo": { "type": "string" },
+              "valor": { "type": "string" }
+            }
+          }
+        },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["titulo", "valorCupom", "cupons", "createdBy", "createdAt", "updatedAt", "updatedBy"]
     },
     "DespesaFixa": {
       "title": "Despesa Fixa",
@@ -141,11 +208,23 @@
       },
       "description": "Quick links for Sambox"
     },
+    "/samboxCupons/{cupomId}": {
+      "schema": {
+        "$ref": "#/entities/CupomItem"
+      },
+      "description": "Standalone coupons for Sambox"
+    },
     "/steamLinks/{linkId}": {
       "schema": {
         "$ref": "#/entities/QuickLink"
       },
       "description": "Quick links for Steam"
+    },
+    "/steamCupons/{cupomId}": {
+      "schema": {
+        "$ref": "#/entities/CupomItem"
+      },
+      "description": "Standalone coupons for Steam"
     },
     "/users/{userId}": {
       "schema": {
@@ -164,6 +243,18 @@
         "$ref": "#/entities/Installation"
       },
       "description": "Records of installations"
+    },
+    "/noticias/{noticiaId}": {
+      "schema": {
+        "$ref": "#/entities/Noticia"
+      },
+      "description": "News mural posts"
+    },
+    "/afiliadoOfertas/{ofertaId}": {
+      "schema": {
+        "$ref": "#/entities/AfiliadoOferta"
+      },
+      "description": "Offers specifically for affiliates"
     }
   }
 }
