@@ -54,6 +54,16 @@ service cloud.firestore {
       return isAuthenticated() && data != null && data.role == role;
     }
 
+    function isApproved() {
+      let data = getUserData();
+      return isAuthenticated() &&
+        (
+          (data != null && data.status == 'approved') ||
+          request.auth.token.email == "sammyanbr@gmail.com" ||
+          request.auth.token.email == "zrpg01@gmail.com"
+        );
+    }
+
     function isAdmin() {
       let data = getUserData();
       return isAuthenticated() &&
@@ -159,14 +169,14 @@ service cloud.firestore {
     }
 
     match /noticias/{noticiaId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidNoticia(request.resource.data);
       allow update: if isGerente() && isValidNoticia(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(userId) || isGerente();
       
       allow create: if isOwner(userId) && isValidUser(request.resource.data) &&
                     (request.resource.data.role == 'instalador' || isInitialAdminCreation()) &&
@@ -183,7 +193,7 @@ service cloud.firestore {
     }
 
     match /videos/{videoId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidVideo(request.resource.data);
       allow update: if isGerente() && isValidVideo(request.resource.data);
       allow delete: if isGerente();
@@ -195,7 +205,7 @@ service cloud.firestore {
       // Note: Rules cannot easily filter by string email unless we use queries.
       // The app uses installations.filter(inst => canSeeAll || isOwner)
       // So we must allow list if the query is correctly filtered OR if user is Gerente.
-      allow read: if isAuthenticated() && (
+      allow read: if isApproved() && (
         isGerente() || 
         resource.data.createdBy == request.auth.token.email ||
         resource.data.instalador == request.auth.token.email.split('@')[0] ||
@@ -205,7 +215,7 @@ service cloud.firestore {
         )
       );
       
-      allow create: if isAuthenticated() && isValidInstallation(request.resource.data) &&
+      allow create: if isApproved() && isValidInstallation(request.resource.data) &&
                     request.resource.data.createdBy == request.auth.token.email;
                     
       allow update: if isGerente() && isValidInstallation(request.resource.data);
@@ -237,33 +247,33 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow write: if isGerente();
     }
 
     match /samboxLinks/{linkId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidQuickLink(request.resource.data);
       allow update: if isGerente() && isValidQuickLink(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /samboxCupons/{cupomId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidCupom(request.resource.data);
       allow update: if isGerente() && isValidCupom(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /steamLinks/{linkId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidQuickLink(request.resource.data);
       allow update: if isGerente() && isValidQuickLink(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /steamCupons/{cupomId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidCupom(request.resource.data);
       allow update: if isGerente() && isValidCupom(request.resource.data);
       allow delete: if isGerente();
@@ -302,31 +312,31 @@ service cloud.firestore {
     }
 
     match /denuvoAccounts/{accountId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidDenuvoAccount(request.resource.data);
       allow update: if isGerente() && isValidDenuvoAccount(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /denuvoPrints/{printId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidDenuvoPrint(request.resource.data);
       allow update: if isGerente() && isValidDenuvoPrint(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /denuvoHistory/{historyId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidDenuvoHistory(request.resource.data);
-      allow update: if isAuthenticated() && isValidDenuvoHistory(request.resource.data);
+      allow read: if isApproved();
+      allow create: if isApproved() && isValidDenuvoHistory(request.resource.data);
+      allow update: if isApproved() && isValidDenuvoHistory(request.resource.data);
       allow delete: if isGerente();
     }
 
     match /keyAuthHistory/{historyId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if isApproved();
+      allow create: if isApproved();
+      allow update: if isApproved();
+      allow delete: if isApproved();
     }
     
     function isValidAfiliadoOferta(data) {
@@ -341,7 +351,7 @@ service cloud.firestore {
     }
 
     match /afiliadoOfertas/{ofertaId} {
-      allow read: if isAuthenticated();
+      allow read: if isApproved();
       allow create: if isGerente() && isValidAfiliadoOferta(request.resource.data);
       allow update: if isGerente() && isValidAfiliadoOferta(request.resource.data);
       allow delete: if isGerente();
