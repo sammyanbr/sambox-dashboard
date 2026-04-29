@@ -54,14 +54,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setDisplayName(dbDisplayName);
         setPhotoURL(dbPhotoURL);
         if (isMaster && (dbRole !== 'administrador' || dbStatus !== 'approved')) {
-          await setDoc(userDocRef, { 
+          const updateData: any = {
             role: 'administrador', 
             status: 'approved',
             email: currentUser.email,
             displayName: dbDisplayName,
-            photoURL: dbPhotoURL,
             createdAt: data.createdAt || serverTimestamp()
-          }, { merge: true });
+          };
+          if (dbPhotoURL !== null) {
+            updateData.photoURL = dbPhotoURL;
+          }
+          await setDoc(userDocRef, updateData, { merge: true });
           setRole('administrador');
           setStatus('approved');
         } else {
@@ -79,7 +82,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: newRole,
           status: newStatus,
           displayName: initialDisplayName,
-          photoURL: null,
           createdAt: serverTimestamp()
         });
         setRole(newRole);
@@ -89,9 +91,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error("Erro ao buscar/criar perfil do usuário:", error);
-      setRole(null);
-      setStatus(null);
-      setDisplayName(null);
+      setRole('instalador');
+      setStatus('pending');
+      setDisplayName(currentUser.email?.split('@')[0] || '');
       setPhotoURL(null);
     }
   };
