@@ -15,6 +15,10 @@ const outfit = Outfit({
 export const metadata: Metadata = {
   title: 'Sambox Dashboard - Gestão Financeira',
   description: 'Sistema de gestão moderna para ANBR Empresa',
+  icons: {
+    icon: '/favicon.ico',
+    apple: '/favicon.ico',
+  }
 };
 
 export default function RootLayout({children}: {children: React.ReactNode}) {

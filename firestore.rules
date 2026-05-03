@@ -116,8 +116,10 @@ service cloud.firestore {
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasAll(['date', 'vendas', 'pix', 'ads_facebook', 'ads_google', 'ads_tiktok', 'extras', 'descricao_extra', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
+      return data.keys().hasAll(['date', 'produto', 'vendas', 'pix', 'ads_facebook', 'ads_google', 'ads_tiktok', 'extras', 'descricao_extra', 'createdBy', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.date is string &&
+             data.produto is string &&
+             data.produto in ['sambox', 'steam', 'geral'] &&
              data.vendas is number &&
              data.pix is number &&
              data.ads_facebook is number &&
@@ -231,8 +233,10 @@ service cloud.firestore {
     }
 
     function isValidDespesaFixa(data) {
-      return data.keys().hasAll(['descricao', 'valor', 'createdAt', 'updatedAt', 'updatedBy']) &&
+      return data.keys().hasAll(['descricao', 'produto', 'valor', 'createdAt', 'updatedAt', 'updatedBy']) &&
              data.descricao is string &&
+             data.produto is string &&
+             data.produto in ['sambox', 'steam', 'geral'] &&
              data.valor is number &&
              data.createdAt is string &&
              data.updatedAt is string &&
@@ -320,9 +324,9 @@ service cloud.firestore {
 
     match /denuvoPrints/{printId} {
       allow read: if isApproved();
-      allow create: if isGerente() && isValidDenuvoPrint(request.resource.data);
-      allow update: if isGerente() && isValidDenuvoPrint(request.resource.data);
-      allow delete: if isGerente();
+      allow create: if isApproved() && isValidDenuvoPrint(request.resource.data);
+      allow update: if isApproved() && isValidDenuvoPrint(request.resource.data);
+      allow delete: if isApproved();
     }
 
     match /denuvoHistory/{historyId} {

@@ -36,7 +36,8 @@ import {
   Percent,
   Gamepad2,
   Menu,
-  Home
+  Home,
+  ImageIcon
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { auth, db } from '../lib/firebase';
@@ -248,14 +249,18 @@ export default function Dashboard() {
   };
 
   // Financeiro State
-  const [despesasFixas, setDespesasFixas] = useState<{id: string, valor: number, descricao: string}[]>([]);
+  const [despesasFixas, setDespesasFixas] = useState<{id: string, valor: number, descricao: string, produto?: string}[]>([]);
   const [isEditingDespesas, setIsEditingDespesas] = useState(false);
-  const [novaDespesa, setNovaDespesa] = useState({ valor: '', descricao: '' });
-
-  const totalDespesasFixas = despesasFixas.reduce((acc, curr) => acc + curr.valor, 0);
+  const [novaDespesa, setNovaDespesa] = useState({ valor: '', descricao: '', produto: 'geral' });
 
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isFetchingTransactions, setIsFetchingTransactions] = useState(false);
+  
+  const [financeProductFilter, setFinanceProductFilter] = useState<'geral' | 'sambox' | 'steam'>('geral');
+  const [financePeriodFilter, setFinancePeriodFilter] = useState<'todos' | 'hoje' | 'mes' | 'ano'>('todos');
+
+  const filteredDespesasFixas = despesasFixas.filter(d => financeProductFilter === 'geral' || (d.produto || 'geral') === financeProductFilter);
+  const totalDespesasFixas = filteredDespesasFixas.reduce((acc, curr) => acc + curr.valor, 0);
 
   // KeyAuth State
   const [keyAuthSellerKey, setKeyAuthSellerKey] = useState('b01f1b891124badd9be270a3db589cf6');
@@ -314,11 +319,12 @@ export default function Dashboard() {
         await addDoc(collection(db, 'despesasFixas'), {
           descricao: novaDespesa.descricao,
           valor: Number(novaDespesa.valor),
+          produto: novaDespesa.produto || financeProductFilter === 'geral' ? 'geral' : financeProductFilter,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           updatedBy: user?.uid || 'unknown'
         });
-        setNovaDespesa({ valor: '', descricao: '' });
+        setNovaDespesa({ valor: '', descricao: '', produto: 'geral' });
       } catch (error) {
         console.error('Error adding despesa fixa:', error);
         alert('Erro ao adicionar despesa fixa.');
@@ -607,6 +613,7 @@ export default function Dashboard() {
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
+    produto: 'sambox',
     vendas: '',
     pix: '',
     ads_facebook: '',
@@ -1207,6 +1214,17 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteDenuvoPrint = async (printId: string) => {
+    if (confirm('Tem certeza que deseja excluir esta print?')) {
+      try {
+        await deleteDoc(doc(db, 'denuvoPrints', printId));
+      } catch (error) {
+        console.error('Error deleting denuvo print:', error);
+        alert('Erro ao excluir print.');
+      }
+    }
+  };
+
   const handleDenuvoHistorySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!denuvoHistoryFormData.accountId || !denuvoHistoryFormData.gameName) return;
@@ -1295,6 +1313,7 @@ export default function Dashboard() {
     
     const updatedTransaction = {
       date: editingTransaction.date,
+      produto: editingTransaction.produto || 'sambox',
       vendas: Number(editingTransaction.vendas) || 0,
       pix: Number(editingTransaction.pix) || 0,
       ads_facebook: Number(editingTransaction.ads_facebook) || 0,
@@ -1360,7 +1379,7 @@ export default function Dashboard() {
     alert('Link copiado para a área de transferência!');
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -1374,6 +1393,7 @@ export default function Dashboard() {
     e.preventDefault();
     const newTransaction = {
       date: formData.date,
+      produto: formData.produto || 'sambox',
       vendas: Number(formData.vendas) || 0,
       pix: Number(formData.pix) || 0,
       ads_facebook: Number(formData.ads_facebook) || 0,
@@ -1391,6 +1411,7 @@ export default function Dashboard() {
       await addDoc(collection(db, 'transactions'), newTransaction);
       setFormData({
         date: new Date().toISOString().split('T')[0],
+        produto: 'sambox',
         vendas: '',
         pix: '',
         ads_facebook: '',
@@ -1494,7 +1515,9 @@ export default function Dashboard() {
     const googleAds = t.ads_google || 0;
     const tiktokAds = t.ads_tiktok || 0;
     const totalAds = fbAds + googleAds + tiktokAds + (t.publicidade || 0);
-    const instalacoesCount = getInstallationsForDate(t.date);
+    // Only deduct installations if it's sambox, as we assumed earlier.
+    // Or we keep it as is, which is getInstallationsForDate
+    const instalacoesCount = (t.produto === 'sambox' || !t.produto) ? getInstallationsForDate(t.date) : 0;
     return (t.vendas + (t.pix || 0)) - totalAds - t.extras - (instalacoesCount * INSTALLATION_COST);
   };
   
@@ -1502,15 +1525,25 @@ export default function Dashboard() {
   const currentMonth = today.substring(0, 7);
   const currentYear = today.substring(0, 4);
 
-  const lucroDiario = transactions
+  const filteredTransactions = transactions.filter(t => financeProductFilter === 'geral' || (t.produto || 'sambox') === financeProductFilter);
+
+  const filteredTransactionsList = filteredTransactions.filter(t => {
+    if (financePeriodFilter === 'todos') return true;
+    if (financePeriodFilter === 'hoje') return t.date === today;
+    if (financePeriodFilter === 'mes') return t.date.startsWith(currentMonth);
+    if (financePeriodFilter === 'ano') return t.date.startsWith(currentYear);
+    return true;
+  });
+
+  const lucroDiario = filteredTransactions
     .filter(t => t.date === today)
     .reduce((acc, t) => acc + calculateLucro(t), 0);
 
-  const lucroMensal = transactions
+  const lucroMensal = filteredTransactions
     .filter(t => t.date.startsWith(currentMonth))
     .reduce((acc, t) => acc + calculateLucro(t), 0);
 
-  const lucroAnual = transactions
+  const lucroAnual = filteredTransactions
     .filter(t => t.date.startsWith(currentYear))
     .reduce((acc, t) => acc + calculateLucro(t), 0);
 
@@ -1622,10 +1655,18 @@ export default function Dashboard() {
                     )}
                     {!isAfiliado && (
                       <button 
-                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsSteamDropdownOpen(false); }}
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setDenuvoTabMode('contas'); setIsSteamDropdownOpen(false); }}
                         className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
                       >
                         <Gamepad2 className="w-4 h-4" /> Denuvo
+                      </button>
+                    )}
+                    {!isAfiliado && (
+                      <button 
+                        onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setDenuvoTabMode('prints'); setIsSteamDropdownOpen(false); }}
+                        className="w-full px-5 py-3.5 text-left text-xs font-black uppercase tracking-widest text-gray-400 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-3 border-t border-white/5"
+                      >
+                        <ImageIcon className="w-4 h-4" /> Prints
                       </button>
                     )}
                   </div>
@@ -1657,11 +1698,11 @@ export default function Dashboard() {
               </div>
               <button 
                 onClick={() => { setActiveMainTab('perfil'); window.scrollTo(0, 0); }}
-                className="w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center hover:bg-blue-500/20 transition-all hover:scale-110 active:scale-95 group overflow-hidden"
+                className="relative w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center hover:bg-blue-500/20 transition-all hover:scale-110 active:scale-95 group overflow-hidden"
                 title="Minha Conta"
               >
                 {photoURL ? (
-                  <img src={photoURL} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                  <Image src={photoURL} alt="User" fill referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                 ) : (
                   <User className="w-5 h-5 text-blue-500 group-hover:text-blue-400 transition-colors" />
                 )}
@@ -1772,11 +1813,21 @@ export default function Dashboard() {
 
                   {!isAfiliado && (
                     <button 
-                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setIsMobileMenuOpen(false); }}
-                      className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'denuvo') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setDenuvoTabMode('contas'); setIsMobileMenuOpen(false); }}
+                      className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'denuvo' && denuvoTabMode === 'contas') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
                     >
                       <div className="flex items-center gap-3">
                         <Gamepad2 className="w-4 h-4" /> Denuvo
+                      </div>
+                    </button>
+                  )}
+                  {!isAfiliado && (
+                    <button 
+                      onClick={() => { setActiveMainTab('others'); setActiveSubTab('denuvo'); setDenuvoTabMode('prints'); setIsMobileMenuOpen(false); }}
+                      className={`w-full text-left px-4 py-3 rounded-xl font-bold uppercase tracking-widest text-[10px] transition-colors ${(activeMainTab === 'others' && activeSubTab === 'denuvo' && denuvoTabMode === 'prints') ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-white/5'}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <ImageIcon className="w-4 h-4" /> Prints
                       </div>
                     </button>
                   )}
@@ -2031,9 +2082,9 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center justify-between mt-auto pt-6 border-t border-white/10">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center overflow-hidden">
+                        <div className="relative w-10 h-10 rounded-full bg-blue-600/10 border border-blue-500/20 flex items-center justify-center overflow-hidden">
                           {noticia.authorPhotoURL ? (
-                            <img src={noticia.authorPhotoURL} alt="Author" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <Image src={noticia.authorPhotoURL} alt="Author" fill className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
                             <User className="w-5 h-5 text-blue-500" />
                           )}
@@ -2095,6 +2146,57 @@ export default function Dashboard() {
 
         {activeMainTab === 'financeiro' && isAdmin && (
           <>
+            {/* Filtros Financeiros */}
+            <div className="flex flex-col md:flex-row justify-between gap-4 mb-6">
+              <div className="flex flex-wrap bg-[#111111] p-1 rounded-xl border border-white/10 w-fit">
+                <button
+                  onClick={() => setFinanceProductFilter('geral')}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${financeProductFilter === 'geral' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Geral
+                </button>
+                <button
+                  onClick={() => setFinanceProductFilter('sambox')}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${financeProductFilter === 'sambox' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Sambox
+                </button>
+                <button
+                  onClick={() => setFinanceProductFilter('steam')}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${financeProductFilter === 'steam' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.3)]' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Steam
+                </button>
+              </div>
+
+              <div className="flex flex-wrap bg-[#111111] p-1 rounded-xl border border-white/10 w-fit">
+                <button
+                  onClick={() => setFinancePeriodFilter('todos')}
+                  className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financePeriodFilter === 'todos' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setFinancePeriodFilter('hoje')}
+                  className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financePeriodFilter === 'hoje' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Hoje
+                </button>
+                <button
+                  onClick={() => setFinancePeriodFilter('mes')}
+                  className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financePeriodFilter === 'mes' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Mês
+                </button>
+                <button
+                  onClick={() => setFinancePeriodFilter('ano')}
+                  className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${financePeriodFilter === 'ano' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-white'}`}
+                >
+                  Ano
+                </button>
+              </div>
+            </div>
+
             {/* Resumo Cards - Horizontal Scroll on Mobile */}
             <div className="flex overflow-x-auto pb-4 md:pb-0 md:grid md:grid-cols-3 gap-4 md:gap-6 mb-8 no-scrollbar snap-x">
               {/* Lucro Diário */}
@@ -2152,6 +2254,16 @@ export default function Dashboard() {
                         </div>
                       ))}
                       <div className="flex items-center gap-2 mt-2">
+                        <select
+                          value={financeProductFilter === 'geral' ? novaDespesa.produto : financeProductFilter}
+                          onChange={e => setNovaDespesa({...novaDespesa, produto: e.target.value})}
+                          disabled={financeProductFilter !== 'geral'}
+                          className="bg-black border border-white/10 rounded px-2 py-1 text-white focus:outline-none focus:border-blue-500 text-[10px] uppercase font-bold"
+                        >
+                          <option value="geral">Geral</option>
+                          <option value="sambox">Sambox</option>
+                          <option value="steam">Steam</option>
+                        </select>
                         <input 
                           type="text" 
                           placeholder="Descrição"
@@ -2204,6 +2316,22 @@ export default function Dashboard() {
                     </h2>
                     
                     <form onSubmit={handleSubmit} className="space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5 border-b border-white/5 pb-5">
+                        <div>
+                          <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Produto</label>
+                          <select
+                            name="produto"
+                            value={formData.produto}
+                            onChange={handleInputChange}
+                            className="w-full bg-[#080808] border border-white/10 rounded-xl px-4 py-4 text-base text-white focus:outline-none focus:border-blue-600 transition-all font-bold uppercase"
+                          >
+                            <option value="sambox">Sambox</option>
+                            <option value="steam">Project Steam</option>
+                            <option value="geral">Geral</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div>
                           <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Data do Registro</label>
@@ -2292,10 +2420,16 @@ export default function Dashboard() {
                         <div>
                           <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Instalações (Automático)</label>
                           <div className="w-full bg-[#080808]/50 border border-white/5 rounded-xl px-4 py-4 text-base text-gray-500 flex justify-between items-center">
-                            <span>{getInstallationsForDate(formData.date)} registradas</span>
-                            <span className="text-rose-500 font-bold">-{formatCurrency(getInstallationsForDate(formData.date) * INSTALLATION_COST)}</span>
+                            <span>{formData.produto === 'sambox' ? getInstallationsForDate(formData.date) : 0} registradas</span>
+                            <span className={`font-bold ${formData.produto === 'sambox' && getInstallationsForDate(formData.date) > 0 ? 'text-rose-500' : ''}`}>
+                              -{formatCurrency((formData.produto === 'sambox' ? getInstallationsForDate(formData.date) : 0) * INSTALLATION_COST)}
+                            </span>
                           </div>
-                          <p className="text-[10px] text-gray-600 mt-1 ml-1 uppercase font-bold">Vinculado ao módulo de instalações</p>
+                          {formData.produto === 'sambox' ? (
+                            <p className="text-[10px] text-gray-600 mt-1 ml-1 uppercase font-bold">Vinculado ao módulo de instalações</p>
+                          ) : (
+                            <p className="text-[10px] text-gray-600 mt-1 ml-1 uppercase font-bold">Apenas para Sambox</p>
+                          )}
                         </div>
                         <div>
                           <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2 ml-1">Gastos Extras (R$)</label>
@@ -2354,16 +2488,25 @@ export default function Dashboard() {
                           <Activity className="w-8 h-8 text-blue-500 animate-spin" />
                           <span className="text-xs font-black text-blue-500 uppercase tracking-widest">Carregando transações...</span>
                         </div>
-                      ) : transactions.length > 0 ? (
-                        transactions.map((t) => {
+                      ) : filteredTransactionsList.length > 0 ? (
+                        filteredTransactionsList.map((t) => {
                           const lucro = calculateLucro(t);
-                          const instalacoesCount = getInstallationsForDate(t.date);
+                          const instalacoesCount = (t.produto === 'sambox' || !t.produto) ? getInstallationsForDate(t.date) : 0;
                           return (
                             <div key={t.id} className="p-6 space-y-5">
-                              <div className="flex justify-between items-center">
-                                <span className="text-xs font-black text-gray-500 uppercase tracking-widest">
-                                  {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                                </span>
+                              <div className="flex justify-between items-start mb-2">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                                    {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                  </span>
+                                  <span className={`text-[9px] uppercase font-black px-2 py-0.5 rounded w-fit ${
+                                    t.produto === 'sambox' ? 'bg-orange-500/10 text-orange-400' :
+                                    t.produto === 'steam' ? 'bg-blue-500/10 text-blue-400' :
+                                    'bg-purple-500/10 text-purple-400'
+                                  }`}>
+                                    {t.produto || 'sambox'}
+                                  </span>
+                                </div>
                                 <span className={`text-lg font-black ${lucro >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                   {formatCurrency(lucro)}
                                 </span>
@@ -2431,14 +2574,23 @@ export default function Dashboard() {
                                 </div>
                               </td>
                             </tr>
-                          ) : transactions.length > 0 ? (
-                            transactions.map((t) => {
+                          ) : filteredTransactionsList.length > 0 ? (
+                            filteredTransactionsList.map((t) => {
                               const lucro = calculateLucro(t);
-                              const instalacoesCount = getInstallationsForDate(t.date);
+                              const instalacoesCount = (t.produto === 'sambox' || !t.produto) ? getInstallationsForDate(t.date) : 0;
                               return (
                                 <tr key={t.id} className="hover:bg-white/[0.02] transition-colors group">
-                                  <td className="px-6 py-6 text-sm text-gray-400 font-medium">
-                                    {new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                                  <td className="px-6 py-6 text-sm text-gray-400 font-medium whitespace-nowrap">
+                                    <div className="flex flex-col gap-1">
+                                      <span>{new Date(t.date).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</span>
+                                      <span className={`text-[9px] uppercase font-black px-2 py-0.5 rounded w-fit ${
+                                        t.produto === 'sambox' ? 'bg-orange-500/10 text-orange-400' :
+                                        t.produto === 'steam' ? 'bg-blue-500/10 text-blue-400' :
+                                        'bg-purple-500/10 text-purple-400'
+                                      }`}>
+                                        {t.produto || 'sambox'}
+                                      </span>
+                                    </div>
                                   </td>
                                   <td className="px-6 py-6 text-sm text-emerald-500 font-black">
                                     {formatCurrency(t.vendas)}
@@ -3997,9 +4149,16 @@ export default function Dashboard() {
                               </div>
                               <div className="p-4 flex items-center justify-between">
                                 <h4 className="text-sm font-black text-white uppercase tracking-tight">{print.gameName}</h4>
-                                <a href={print.imageUrl} download={`${print.gameName}-print.jpg`} className="p-2 bg-blue-600/10 text-blue-500 rounded-lg hover:bg-blue-600 hover:text-white transition-colors" title="Baixar Print">
-                                  <Download className="w-4 h-4" />
-                                </a>
+                                <div className="flex items-center gap-2">
+                                  {(isGerente || user?.email === print.createdBy) && (
+                                    <button onClick={() => handleDeleteDenuvoPrint(print.id)} className="p-2 bg-red-600/10 text-red-500 rounded-lg hover:bg-red-600 hover:text-white transition-colors" title="Excluir Print">
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                  <a href={print.imageUrl} download={`${print.gameName}-print.jpg`} className="p-2 bg-blue-600/10 text-blue-500 rounded-lg hover:bg-blue-600 hover:text-white transition-colors" title="Baixar Print">
+                                    <Download className="w-4 h-4" />
+                                  </a>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -4601,6 +4760,18 @@ export default function Dashboard() {
               </div>
               
               <form onSubmit={handleEditTransactionSubmit} className="space-y-6">
+                <div className="space-y-2 mb-6 border-b border-white/5 pb-6">
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Produto</label>
+                  <select
+                    value={editingTransaction.produto || 'sambox'}
+                    onChange={e => setEditingTransaction({...editingTransaction, produto: e.target.value})}
+                    className="block w-full px-4 py-3 bg-black border border-white/10 rounded-xl text-white focus:outline-none focus:border-blue-500 transition-all font-bold uppercase text-sm"
+                  >
+                    <option value="sambox">Sambox</option>
+                    <option value="steam">Project Steam</option>
+                    <option value="geral">Geral</option>
+                  </select>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="block text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Data</label>
